@@ -1,18 +1,19 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  RefreshControl,
-  Dimensions,
-} from 'react-native';
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import {
+  Dimensions,
+  Image,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useAuthStore } from '../../store/authStore';
-import { dashboardAPI, inquiryAPI, categoryAPI, seedAPI } from '../../utils/api';
-import { DashboardStats, Inquiry, Category } from '../../types';
+import { DashboardStats } from '../../types';
+import { categoryAPI, contactAPI, dashboardAPI } from '../../utils/api';
 
 const { width } = Dimensions.get('window');
 
@@ -21,36 +22,38 @@ export default function Dashboard() {
   const vendor = useAuthStore((state) => state.vendor);
   const [stats, setStats] = useState<DashboardStats>({
     totalServices: 0,
-    newInquiries: 0,
-    totalBookings: 0,
-    totalEarnings: 0,
+    newInquiries: 0
   });
-  const [inquiries, setInquiries] = useState<Inquiry[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [inquiries, setInquiries] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'purchased' | 'available'>('purchased');
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [purchasedCategories, setPurchasedCategories] = useState<any[]>([]);
 
   useEffect(() => {
+
+    debugger
     loadDashboardData();
   }, []);
 
   const loadDashboardData = async () => {
+
     if (!vendor) return;
 
     try {
-      // Seed categories first time
-      await seedAPI.seedCategories().catch(() => {});
-      
-      const [statsRes, inquiriesRes, categoriesRes] = await Promise.all([
-        dashboardAPI.getStats(vendor.id),
-        inquiryAPI.getInquiries(vendor.id),
-        categoryAPI.getCategories(vendor.id),
+      debugger
+      const [statsRes, inquiriesRes, categoriesRes, pcategory] = await Promise.all([
+        dashboardAPI.getVendorStats(vendor._id),
+        contactAPI.getAllContacts(vendor._id),
+        categoryAPI.getAllCategories(),
+        categoryAPI.getPurchasedCategories(vendor._id),
       ]);
-
-      setStats(statsRes.data);
-      setInquiries(inquiriesRes.data.slice(0, 5));
-      setCategories(categoriesRes.data);
+      debugger
+      setStats(statsRes.data.data);
+      setInquiries(inquiriesRes.data.contacts.slice(0, 5));
+      setCategories(categoriesRes.data.categories);
+      setPurchasedCategories(pcategory.data.categories)
     } catch (error) {
       console.error('Error loading dashboard:', error);
     } finally {
@@ -63,12 +66,6 @@ export default function Dashboard() {
     setRefreshing(true);
     loadDashboardData();
   };
-
-  const filteredCategories = categories.filter((cat) =>
-    activeTab === 'purchased' ? cat.isPurchased : !cat.isPurchased
-  );
-
-  const purchasedCategories = categories.filter((cat) => cat.isPurchased);
 
   return (
     <ScrollView
@@ -99,7 +96,7 @@ export default function Dashboard() {
 
           <View style={[styles.statCard, { backgroundColor: '#10b981' }]}>
             <Text style={styles.statLabel}>NEW INQUIRIES</Text>
-            <Text style={styles.statValue}>{stats.newInquiries}</Text>
+            <Text style={styles.statValue}>{inquiries.length || 0}</Text>
             <Ionicons name="chatbubble" size={32} color="rgba(255,255,255,0.3)" style={styles.statIcon} />
           </View>
         </View>
@@ -107,12 +104,12 @@ export default function Dashboard() {
         <View style={styles.statsRow}>
           <View style={[styles.statCard2, { backgroundColor: '#e0e7ff' }]}>
             <Text style={styles.statLabel2}>Total Bookings</Text>
-            <Text style={styles.statValue2}>{stats.totalBookings}</Text>
+            <Text style={styles.statValue2}>0</Text>
           </View>
 
           <View style={[styles.statCard2, { backgroundColor: '#d1fae5' }]}>
             <Text style={styles.statLabel2}>Total Earnings</Text>
-            <Text style={styles.statValue2}>₹{stats.totalEarnings.toFixed(2)}</Text>
+            <Text style={styles.statValue2}>₹0</Text>
           </View>
         </View>
       </View>
@@ -148,19 +145,34 @@ export default function Dashboard() {
           </TouchableOpacity>
         </View>
 
-        {activeTab === 'purchased' && purchasedCategories.length === 0 ? (
-          <Text style={styles.emptyText}>You have not purchased any categories yet.</Text>
+        {activeTab === 'purchased' ? (
+          <>
+            {purchasedCategories.length === 0 ? (
+              <Text style={styles.emptyText}>You have not purchased any categories yet.</Text>
+            ) : (
+              <View style={styles.categoriesList}>
+                {purchasedCategories.map((category) => (
+                  <View key={category._id} style={styles.categoryCard}>
+                    <View style={styles.categoryIcon}>
+                      <Image source={{uri:category.image}} resizeMode='contain'/>
+                    </View>
+                    <Text style={styles.categoryName}>{category.name}</Text>
+                    <Text style={styles.categoryPrice}>₹{category.price}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </>
+
         ) : (
           <View style={styles.categoriesList}>
-            {filteredCategories.map((category) => (
-              <View key={category.id} style={styles.categoryCard}>
+            {categories.map((category) => (
+              <View key={category._id} style={styles.categoryCard}>
                 <View style={styles.categoryIcon}>
-                  <Ionicons name={category.icon as any} size={24} color="#6366f1" />
+                  <Image source={{uri:category.image}} resizeMode='contain'/>
                 </View>
                 <Text style={styles.categoryName}>{category.name}</Text>
-                {!category.isPurchased && (
-                  <Text style={styles.categoryPrice}>₹{category.price}</Text>
-                )}
+                <Text style={styles.categoryPrice}>₹{category.price}</Text>
               </View>
             ))}
           </View>

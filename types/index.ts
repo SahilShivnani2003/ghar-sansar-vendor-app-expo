@@ -87,6 +87,4 @@ export interface Log {
 export interface DashboardStats {
   totalServices: number;
   newInquiries: number;
-  totalBookings: number;
-  totalEarnings: number;
 }

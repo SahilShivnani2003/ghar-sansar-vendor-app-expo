@@ -14,25 +14,33 @@ import {
   View
 } from 'react-native';
 import { useAuthStore } from '../../store/authStore';
-import { authAPI } from '../../utils/api';
+import { vendorAPI } from '../../utils/api';
 
 export default function Login() {
   const router = useRouter();
   const setVendor = useAuthStore((state) => state.setVendor);
-  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
-    if (!email || !password) {
+    if (!phone || !password) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
     }
-
     setLoading(true);
     try {
-      const response = await authAPI.login({ email, password });
-      await setVendor(response.data);
+      const loginData = {
+        phone : phone,
+        password: password
+      }
+      const response = await vendorAPI.login(loginData);
+      debugger
+      if(!response.data.success){
+        Alert.alert('Error', response.data.message || 'Login failed');
+        return;
+      }
+      await setVendor(response.data.user);
       router.replace('/(tabs)/dashboard');
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.detail || 'Login failed');
@@ -62,10 +70,10 @@ export default function Login() {
             <Ionicons name="mail-outline" size={20} color="#6b7280" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="Email"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
+              placeholder="Phone Number"
+              value={phone}
+              onChangeText={setPhone}
+              keyboardType="phone-pad"
               autoCapitalize="none"
             />
           </View>

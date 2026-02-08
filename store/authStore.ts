@@ -1,11 +1,10 @@
-import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Vendor } from '../types';
+import { create } from 'zustand';
 
 interface AuthState {
-  vendor: Vendor | null;
+  vendor: any | null;
   isAuthenticated: boolean;
-  setVendor: (vendor: Vendor | null) => void;
+  setVendor: (vendor: any | null) => void;
   logout: () => void;
   loadVendor: () => Promise<void>;
 }
@@ -16,6 +15,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   setVendor: async (vendor) => {
     if (vendor) {
       await AsyncStorage.setItem('vendor', JSON.stringify(vendor));
+      
       set({ vendor, isAuthenticated: true });
     } else {
       await AsyncStorage.removeItem('vendor');
