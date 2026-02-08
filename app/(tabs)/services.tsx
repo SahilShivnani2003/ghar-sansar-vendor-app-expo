@@ -1,23 +1,23 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  RefreshControl,
-  Alert,
-} from 'react-native';
-import { useRouter } from 'expo-router';
+import { propertyAPI } from '@/utils/api';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import {
+  Alert,
+  Image,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useAuthStore } from '../../store/authStore';
-import { serviceAPI } from '../../utils/api';
-import { Service } from '../../types';
 
 export default function Services() {
   const router = useRouter();
   const vendor = useAuthStore((state) => state.vendor);
-  const [services, setServices] = useState<Service[]>([]);
+  const [services, setServices] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
@@ -28,8 +28,8 @@ export default function Services() {
     if (!vendor) return;
 
     try {
-      const response = await serviceAPI.getServices(vendor.id);
-      setServices(response.data);
+      const response = await propertyAPI.getVendorProperties(vendor._id)
+      setServices(response.data.properties);
     } catch (error) {
       console.error('Error loading services:', error);
     } finally {
@@ -53,7 +53,7 @@ export default function Services() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await serviceAPI.deleteService(serviceId, vendor!.id);
+              await propertyAPI.deleteProperty(serviceId);
               loadServices();
               Alert.alert('Success', 'Service deleted successfully');
             } catch (error) {
@@ -98,10 +98,13 @@ export default function Services() {
           </View>
         ) : (
           services.map((service) => (
-            <View key={service.id} style={styles.serviceCard}>
+            <View key={service._id} style={styles.serviceCard}>
               <View style={styles.serviceHeader}>
+                <View style={styles.serviceIcon}>
+                  <Image source={{ uri:service.images.url }} resizeMode='contain' />
+                </View>
                 <View style={styles.serviceInfo}>
-                  <Text style={styles.serviceName}>{service.name}</Text>
+                  <Text style={styles.serviceName}>{service.title}</Text>
                   <Text style={styles.serviceCategory}>{service.category}</Text>
                 </View>
                 <View
@@ -123,10 +126,10 @@ export default function Services() {
                   <Ionicons name="cash-outline" size={16} color="#6b7280" />
                   <Text style={styles.detailText}>₹{service.price}</Text>
                 </View>
-                <View style={styles.detailItem}>
+                {/* <View style={styles.detailItem}>
                   <Ionicons name="time-outline" size={16} color="#6b7280" />
                   <Text style={styles.detailText}>{service.duration}</Text>
-                </View>
+                </View> */}
                 <View style={styles.detailItem}>
                   <Ionicons name="location-outline" size={16} color="#6b7280" />
                   <Text style={styles.detailText}>{service.location}</Text>
@@ -136,7 +139,7 @@ export default function Services() {
               <View style={styles.serviceActions}>
                 <TouchableOpacity
                   style={[styles.actionButton, styles.editButton]}
-                  onPress={() => router.push(`/edit-service?id=${service.id}`)}
+                  onPress={() => router.push(`/add-service?id=${service.id}`)}
                 >
                   <Ionicons name="pencil" size={18} color="#6366f1" />
                   <Text style={styles.editButtonText}>Edit</Text>
@@ -172,6 +175,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
+  },
+  serviceIcon: {
+    width: 48,
+    height: 48,
+    backgroundColor: '#ede9fe',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    marginRight: 12
   },
   title: {
     fontSize: 24,

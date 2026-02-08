@@ -1,61 +1,62 @@
-import React, { useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  TextInput,
+  ActivityIndicator,
   Alert,
   Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
 import { useAuthStore } from '../../store/authStore';
 import { vendorAPI } from '../../utils/api';
 
 export default function Profile() {
   const router = useRouter();
-  const { vendor, setVendor, logout } = useAuthStore();
-  const [isEditing, setIsEditing] = useState(false);
+  const { vendor, logout } = useAuthStore();
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    name: vendor?.name || '',
-    phone: vendor?.phone || '',
-    businessName: vendor?.businessName || '',
-    businessDescription: vendor?.businessDescription || '',
-    profileImage: vendor?.profileImage || '',
-  });
+  const [profileData, setProfileData] = useState<any>(null);
 
-  const handlePickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.5,
-      base64: true,
-    });
+  useEffect(() => {
+    loadProfile();
+  }, []);
 
-    if (!result.canceled && result.assets[0].base64) {
-      setFormData({ ...formData, profileImage: `data:image/jpeg;base64,${result.assets[0].base64}` });
-    }
-  };
-
-  const handleSave = async () => {
+  const loadProfile = async () => {
     if (!vendor) return;
 
     setLoading(true);
     try {
-      const response = await vendorAPI.updateVendor(vendor.id, formData);
-      await setVendor(response.data);
-      setIsEditing(false);
-      Alert.alert('Success', 'Profile updated successfully');
+      const response = await vendorAPI.getVendor(vendor._id);
+      setProfileData(response.data.vendor);
     } catch (error) {
-      Alert.alert('Error', 'Failed to update profile');
+      console.error('Error loading profile:', error);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleRequestUpdate = () => {
+    Alert.alert(
+      'Request Profile Update',
+      'Do you want to request permission to update your profile?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Request',
+          onPress: async () => {
+            try {
+              await vendorAPI.requestProfileUpdate({ vendorId: vendor?.id });
+              Alert.alert('Success', 'Update request sent successfully. Admin will review your request.');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to send update request');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleLogout = () => {
@@ -76,138 +77,368 @@ export default function Profile() {
     );
   };
 
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#6366f1" />
+      </View>
+    );
+  }
+
+  const profile = profileData || vendor;
+
   return (
     <ScrollView style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>My Profile</Text>
-        {!isEditing ? (
-          <TouchableOpacity
-            style={styles.editButton}
-            onPress={() => setIsEditing(true)}
-          >
-            <Ionicons name="pencil" size={18} color="#6366f1" />
-            <Text style={styles.editButtonText}>Edit</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.editActions}>
-            <TouchableOpacity
-              style={styles.cancelButton}
-              onPress={() => {
-                setIsEditing(false);
-                setFormData({
-                  name: vendor?.name || '',
-                  phone: vendor?.phone || '',
-                  businessName: vendor?.businessName || '',
-                  businessDescription: vendor?.businessDescription || '',
-                  profileImage: vendor?.profileImage || '',
-                });
-              }}
-            >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.saveButton}
-              onPress={handleSave}
-              disabled={loading}
-            >
-              <Text style={styles.saveButtonText}>
-                {loading ? 'Saving...' : 'Save'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        )}
+        <View>
+          <Text style={styles.title}>Partner Profile</Text>
+          <Text style={styles.subtitle}>Manage your profile information</Text>
+        </View>
+        <TouchableOpacity
+          style={styles.requestButton}
+          onPress={handleRequestUpdate}
+        >
+          <Text style={styles.requestButtonText}>Make Request for Update Profile</Text>
+        </TouchableOpacity>
       </View>
 
-      <View style={styles.profileSection}>
-        <TouchableOpacity
-          style={styles.avatarContainer}
-          onPress={isEditing ? handlePickImage : undefined}
-          disabled={!isEditing}
-        >
-          {formData.profileImage ? (
-            <Image source={{ uri: formData.profileImage }} style={styles.avatar} />
+      {/* Profile Card */}
+      <View style={styles.profileCard}>
+        <View style={styles.avatarSection}>
+          {profile?.profileImage ? (
+            <Image source={{ uri: profile.profileImage }} style={styles.avatar} />
           ) : (
             <View style={styles.avatarPlaceholder}>
-              <Ionicons name="person" size={48} color="#6366f1" />
+              <Text style={styles.avatarText}>
+                {profile?.name?.charAt(0)?.toUpperCase() || 'V'}
+              </Text>
             </View>
           )}
-          {isEditing && (
-            <View style={styles.avatarOverlay}>
-              <Ionicons name="camera" size={24} color="#fff" />
+
+          <View style={styles.profileInfo}>
+            <Text style={styles.profileName}>{profile?.name || profile?.businessName}</Text>
+            <Text style={styles.profileRole}>{profile?.businessName}</Text>
+            {profile?.isApproved && (
+              <View style={styles.approvedBadge}>
+                <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+                <Text style={styles.approvedText}>approved</Text>
+              </View>
+            )}
+          </View>
+        </View>
+
+        <View style={styles.profileMeta}>
+          <View style={styles.metaItem}>
+            <Ionicons name="calendar-outline" size={16} color="#6b7280" />
+            <Text style={styles.metaLabel}>Member since</Text>
+            <Text style={styles.metaValue}>
+              {profile?.createdAt ? new Date(profile.createdAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'N/A'}
+            </Text>
+          </View>
+
+          <View style={styles.metaItem}>
+            <Ionicons name="briefcase-outline" size={16} color="#6b7280" />
+            <Text style={styles.metaLabel}>Role</Text>
+            <Text style={styles.metaValue}>Vendor</Text>
+          </View>
+
+          <View style={styles.metaItem}>
+            <Ionicons name="calendar" size={16} color="#6b7280" />
+            <Text style={styles.metaLabel}>Established</Text>
+            <Text style={styles.metaValue}>{profile?.yearOfEstablishment || '2006'}</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Basic Information */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="person-outline" size={20} color="#1f2937" />
+          <Text style={styles.sectionTitle}>Basic Information</Text>
+        </View>
+
+        <View style={styles.infoGrid}>
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>Service Provider / Business Name</Text>
+            <Text style={styles.infoValue}>{profile?.businessName || 'AC Repair Service'}</Text>
+          </View>
+
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>Type of Service</Text>
+            <Text style={styles.infoValue}>{profile?.serviceType || 'Electrical'}</Text>
+          </View>
+
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>Owner / Authorized Person</Text>
+            <Text style={styles.infoValue}>{profile?.name || 'Sahil'}</Text>
+          </View>
+
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>Year of Establishment</Text>
+            <Text style={styles.infoValue}>{profile?.yearOfEstablishment || '2006'}</Text>
+          </View>
+
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>Category</Text>
+            <Text style={styles.infoValue}>{profile?.category || 'A.C. Repairing'}</Text>
+          </View>
+
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>Sub Category</Text>
+            <Text style={styles.infoValue}>{profile?.subCategory || 'Repairing'}</Text>
+          </View>
+
+          <View style={styles.infoItemFull}>
+            <Text style={styles.infoLabel}>Service Description</Text>
+            <Text style={styles.infoValue}>
+              {profile?.businessDescription || 'All Type of Ac repair service'}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Contact Information */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="call-outline" size={20} color="#1f2937" />
+          <Text style={styles.sectionTitle}>Contact Information</Text>
+        </View>
+
+        <View style={styles.infoGrid}>
+          <View style={styles.infoItemFull}>
+            <Text style={styles.infoLabel}>Registered Office / Home Address</Text>
+            <View style={styles.infoValueRow}>
+              <Ionicons name="location-outline" size={16} color="#6b7280" />
+              <Text style={styles.infoValue}>{profile?.address || 'Mp nagar zone 2, Bhopal'}</Text>
             </View>
-          )}
-        </TouchableOpacity>
+          </View>
 
-        <Text style={styles.email}>{vendor?.email}</Text>
+          <View style={styles.infoItemFull}>
+            <Text style={styles.infoLabel}>Service Location / Area Covered</Text>
+            <View style={styles.infoValueRow}>
+              <Ionicons name="location-outline" size={16} color="#6b7280" />
+              <Text style={styles.infoValue}>{profile?.serviceArea || 'Bhopal'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>Primary Contact Number</Text>
+            <View style={styles.infoValueRow}>
+              <Ionicons name="call" size={16} color="#6b7280" />
+              <Text style={styles.infoValue}>{profile?.phone || '9770181286'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>Alternate Contact Number</Text>
+            <View style={styles.infoValueRow}>
+              <Ionicons name="call" size={16} color="#6b7280" />
+              <Text style={styles.infoValue}>{profile?.alternatePhone || '9770181286'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>WhatsApp Number</Text>
+            <View style={styles.infoValueRow}>
+              <Ionicons name="logo-whatsapp" size={16} color="#6b7280" />
+              <Text style={styles.infoValue}>{profile?.whatsappNumber || '-'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>Email Address</Text>
+            <View style={styles.infoValueRow}>
+              <Ionicons name="mail" size={16} color="#6b7280" />
+              <Text style={styles.infoValue}>{profile?.email || 'sahilshivani68@gmail.com'}</Text>
+            </View>
+          </View>
+        </View>
       </View>
 
+      {/* Business & Legal Information */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Personal Information</Text>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>Full Name</Text>
-          {isEditing ? (
-            <TextInput
-              style={styles.input}
-              value={formData.name}
-              onChangeText={(text) => setFormData({ ...formData, name: text })}
-              placeholder="Enter your name"
-            />
-          ) : (
-            <Text style={styles.value}>{vendor?.name}</Text>
-          )}
+        <View style={styles.sectionHeader}>
+          <Ionicons name="business-outline" size={20} color="#1f2937" />
+          <Text style={styles.sectionTitle}>Business & Legal Information</Text>
         </View>
 
-        <View style={styles.field}>
-          <Text style={styles.label}>Phone Number</Text>
-          {isEditing ? (
-            <TextInput
-              style={styles.input}
-              value={formData.phone}
-              onChangeText={(text) => setFormData({ ...formData, phone: text })}
-              placeholder="Enter your phone"
-              keyboardType="phone-pad"
-            />
-          ) : (
-            <Text style={styles.value}>{vendor?.phone}</Text>
-          )}
+        <View style={styles.infoGrid}>
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>Business Type</Text>
+            <View style={styles.infoValueRow}>
+              <Ionicons name="briefcase-outline" size={16} color="#6b7280" />
+              <Text style={styles.infoValue}>{profile?.businessType || 'Other'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>GST Number</Text>
+            <View style={styles.infoValueRow}>
+              <Ionicons name="receipt-outline" size={16} color="#6b7280" />
+              <Text style={styles.infoValue}>{profile?.gstNumber || '-'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>Aadhaar Number</Text>
+            <View style={styles.infoValueRow}>
+              <Ionicons name="card-outline" size={16} color="#6b7280" />
+              <Text style={styles.infoValue}>{profile?.aadhaarNumber || '-'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>PAN Number</Text>
+            <View style={styles.infoValueRow}>
+              <Ionicons name="card-outline" size={16} color="#6b7280" />
+              <Text style={styles.infoValue}>{profile?.panNumber || '-'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.infoItemFull}>
+            <Text style={styles.infoLabel}>Trade License / Shop Act Registration No.</Text>
+            <View style={styles.infoValueRow}>
+              <Ionicons name="document-text-outline" size={16} color="#6b7280" />
+              <Text style={styles.infoValue}>{profile?.tradeLicense || '-'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.infoItemFull}>
+            <Text style={styles.infoLabel}>Admin Commission (%)</Text>
+            <View style={styles.infoValueRow}>
+              <Ionicons name="trending-up-outline" size={16} color="#6b7280" />
+              <Text style={styles.infoValue}>{profile?.adminCommission ? `${profile.adminCommission}%` : 'Not set'}</Text>
+            </View>
+          </View>
         </View>
       </View>
 
+      {/* Bank Details */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Business Information</Text>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>Business Name</Text>
-          {isEditing ? (
-            <TextInput
-              style={styles.input}
-              value={formData.businessName}
-              onChangeText={(text) => setFormData({ ...formData, businessName: text })}
-              placeholder="Enter your business name"
-            />
-          ) : (
-            <Text style={styles.value}>{vendor?.businessName || 'Not set'}</Text>
-          )}
+        <View style={styles.sectionHeader}>
+          <Ionicons name="card-outline" size={20} color="#1f2937" />
+          <Text style={styles.sectionTitle}>Bank Details</Text>
         </View>
 
-        <View style={styles.field}>
-          <Text style={styles.label}>Business Description</Text>
-          {isEditing ? (
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              value={formData.businessDescription}
-              onChangeText={(text) => setFormData({ ...formData, businessDescription: text })}
-              placeholder="Describe your business"
-              multiline
-              numberOfLines={4}
-            />
-          ) : (
-            <Text style={styles.value}>{vendor?.businessDescription || 'Not set'}</Text>
-          )}
+        <View style={styles.infoGrid}>
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>Bank Name</Text>
+            <View style={styles.infoValueRow}>
+              <Ionicons name="business" size={16} color="#6b7280" />
+              <Text style={styles.infoValue}>{profile?.bankName || '-'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>Account Holder Name</Text>
+            <View style={styles.infoValueRow}>
+              <Ionicons name="person-outline" size={16} color="#6b7280" />
+              <Text style={styles.infoValue}>{profile?.accountHolderName || '-'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>Account Number</Text>
+            <View style={styles.infoValueRow}>
+              <Ionicons name="card-outline" size={16} color="#6b7280" />
+              <Text style={styles.infoValue}>{profile?.accountNumber || '-'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>IFSC Code</Text>
+            <View style={styles.infoValueRow}>
+              <Ionicons name="code-outline" size={16} color="#6b7280" />
+              <Text style={styles.infoValue}>{profile?.ifscCode || '-'}</Text>
+            </View>
+          </View>
         </View>
       </View>
 
+      {/* Experience & Staff Information */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="people-outline" size={20} color="#1f2937" />
+          <Text style={styles.sectionTitle}>Experience & Staff Information</Text>
+        </View>
+
+        <View style={styles.infoGrid}>
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>Years of Experience</Text>
+            <View style={styles.infoValueRow}>
+              <Ionicons name="time-outline" size={16} color="#6b7280" />
+              <Text style={styles.infoValue}>{profile?.yearsOfExperience || '0'} years</Text>
+            </View>
+          </View>
+
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>Number of Staff</Text>
+            <View style={styles.infoValueRow}>
+              <Ionicons name="people-outline" size={16} color="#6b7280" />
+              <Text style={styles.infoValue}>{profile?.numberOfStaff || '0'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.infoItemFull}>
+            <Text style={styles.infoLabel}>Services Offered</Text>
+            <View style={styles.infoValueRow}>
+              <Ionicons name="list-outline" size={16} color="#6b7280" />
+              <Text style={styles.infoValue}>{profile?.servicesOffered || '-'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.infoItemFull}>
+            <Text style={styles.infoLabel}>Working Days & Timings</Text>
+            <View style={styles.infoValueRow}>
+              <Ionicons name="calendar-outline" size={16} color="#6b7280" />
+              <Text style={styles.infoValue}>{profile?.workingDays || '-'}</Text>
+            </View>
+          </View>
+        </View>
+      </View>
+
+      {/* Documents */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="document-attach-outline" size={20} color="#1f2937" />
+          <Text style={styles.sectionTitle}>Documents</Text>
+        </View>
+
+        <View style={styles.documentGrid}>
+          <View style={styles.documentItem}>
+            <Text style={styles.documentLabel}>Profile Photo</Text>
+            <Text style={styles.documentValue}>-</Text>
+          </View>
+
+          <View style={styles.documentItem}>
+            <Text style={styles.documentLabel}>Document 1</Text>
+            <Text style={styles.documentValue}>-</Text>
+          </View>
+
+          <View style={styles.documentItem}>
+            <Text style={styles.documentLabel}>Document 2</Text>
+            <Text style={styles.documentValue}>-</Text>
+          </View>
+
+          <View style={styles.documentItem}>
+            <Text style={styles.documentLabel}>Document 3</Text>
+            <Text style={styles.documentValue}>-</Text>
+          </View>
+
+          <View style={styles.documentItem}>
+            <Text style={styles.documentLabel}>Document 4</Text>
+            <Text style={styles.documentValue}>-</Text>
+          </View>
+
+          <View style={styles.documentItem}>
+            <Text style={styles.documentLabel}>Document 5</Text>
+            <Text style={styles.documentValue}>-</Text>
+          </View>
+        </View>
+      </View>
+
+      {/**Quick Actions */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Quick Actions</Text>
 
@@ -256,6 +487,7 @@ export default function Profile() {
         </TouchableOpacity>
       </View>
 
+      {/* Logout Section */}
       <View style={styles.section}>
         <TouchableOpacity
           style={styles.logoutButton}
@@ -274,7 +506,13 @@ export default function Profile() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f9fafb',
+    backgroundColor: '#f3f4f6',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f3f4f6',
   },
   header: {
     flexDirection: 'row',
@@ -291,119 +529,177 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#1f2937',
   },
-  editButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#ede9fe',
-    borderRadius: 8,
-  },
-  editButtonText: {
-    color: '#6366f1',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  editActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  cancelButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#f3f4f6',
-    borderRadius: 8,
-  },
-  cancelButtonText: {
+  subtitle: {
+    fontSize: 13,
     color: '#6b7280',
-    fontSize: 14,
-    fontWeight: '600',
+    marginTop: 2,
   },
-  saveButton: {
+  requestButton: {
+    backgroundColor: '#3b82f6',
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#6366f1',
+    paddingVertical: 10,
     borderRadius: 8,
   },
-  saveButtonText: {
+  requestButtonText: {
     color: '#fff',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
   },
-  profileSection: {
-    alignItems: 'center',
-    padding: 32,
+  profileCard: {
     backgroundColor: '#fff',
+    margin: 16,
+    marginTop: 24,
+    padding: 20,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
   },
-  avatarContainer: {
-    position: 'relative',
+  avatarSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
     marginBottom: 16,
   },
   avatar: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
   },
   avatarPlaceholder: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: '#ede9fe',
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#e5e7eb',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#6366f1',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: '#fff',
-  },
-  email: {
-    fontSize: 14,
+  avatarText: {
+    fontSize: 32,
+    fontWeight: 'bold',
     color: '#6b7280',
   },
+  profileInfo: {
+    marginLeft: 16,
+    flex: 1,
+  },
+  profileName: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  profileRole: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginTop: 2,
+  },
+  approvedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 6,
+  },
+  approvedText: {
+    fontSize: 12,
+    color: '#10b981',
+    fontWeight: '500',
+  },
+  profileMeta: {
+    gap: 12,
+  },
+  metaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  metaLabel: {
+    fontSize: 13,
+    color: '#6b7280',
+  },
+  metaValue: {
+    fontSize: 13,
+    color: '#1f2937',
+    fontWeight: '500',
+  },
   section: {
-    padding: 24,
+    backgroundColor: '#fff',
+    marginHorizontal: 16,
+    marginBottom: 16,
+    padding: 20,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
   },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: '#1f2937',
-    marginBottom: 16,
   },
-  field: {
-    marginBottom: 20,
+  infoGrid: {
+    gap: 16,
   },
-  label: {
-    fontSize: 14,
-    fontWeight: '500',
+  infoItem: {
+    flex: 1,
+  },
+  infoItemFull: {
+    width: '100%',
+  },
+  infoLabel: {
+    fontSize: 12,
     color: '#6b7280',
-    marginBottom: 8,
+    marginBottom: 6,
   },
-  value: {
-    fontSize: 16,
+  infoValue: {
+    fontSize: 14,
+    color: '#1f2937',
+    fontWeight: '500',
+  },
+  infoValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  documentGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  documentItem: {
+    flex: 1,
+    minWidth: '45%',
+  },
+  documentLabel: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginBottom: 4,
+  },
+  documentValue: {
+    fontSize: 14,
     color: '#1f2937',
   },
-  input: {
-    fontSize: 16,
-    color: '#1f2937',
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    padding: 12,
-    backgroundColor: '#fff',
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#fee2e2',
+    padding: 16,
+    borderRadius: 12,
   },
-  textArea: {
-    height: 100,
-    textAlignVertical: 'top',
+  logoutButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ef4444',
+  },
+  bottomPadding: {
+    height: 24,
   },
   menuItem: {
     flexDirection: 'row',
@@ -425,22 +721,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#1f2937',
     fontWeight: '500',
-  },
-  logoutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#fee2e2',
-    padding: 16,
-    borderRadius: 12,
-  },
-  logoutButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#ef4444',
-  },
-  bottomPadding: {
-    height: 24,
-  },
+  }
 });

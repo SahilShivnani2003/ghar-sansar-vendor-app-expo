@@ -1,22 +1,20 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  RefreshControl,
-  Alert,
-} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import React, { useEffect, useState } from 'react';
+import {
+  Alert,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useAuthStore } from '../../store/authStore';
 import { bookingAPI } from '../../utils/api';
-import { Booking } from '../../types';
-import { format } from 'date-fns';
 
 export default function Bookings() {
   const vendor = useAuthStore((state) => state.vendor);
-  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [bookings, setBookings] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<'all' | 'pending' | 'confirmed' | 'completed' | 'cancelled'>('all');
 
@@ -28,8 +26,9 @@ export default function Bookings() {
     if (!vendor) return;
 
     try {
-      const response = await bookingAPI.getBookings(vendor.id);
-      setBookings(response.data);
+      // const response = await bookingAPI.getVendorBookings(vendor.id);
+      const response = await bookingAPI.getAllBookings();
+      setBookings(response.data.bookings || []);
     } catch (error) {
       console.error('Error loading bookings:', error);
     } finally {
@@ -44,7 +43,7 @@ export default function Bookings() {
 
   const handleUpdateStatus = async (bookingId: string, status: string) => {
     try {
-      await bookingAPI.updateBooking(bookingId, { status }, vendor!.id);
+      await bookingAPI.updateBookingStatus(bookingId, { status });
       loadBookings();
       Alert.alert('Success', `Booking ${status} successfully`);
     } catch (error) {
@@ -56,6 +55,11 @@ export default function Bookings() {
     ? bookings
     : bookings.filter((b) => b.status === filter);
 
+  const getStatusCount = (status: string) => {
+    if (status === 'all') return bookings.length;
+    return bookings.filter((b) => b.status === status).length;
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -63,26 +67,40 @@ export default function Bookings() {
         <Text style={styles.subtitle}>{bookings.length} total bookings</Text>
       </View>
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterContainer}
-        contentContainerStyle={styles.filterContent}
-      >
-        {['all', 'pending', 'confirmed', 'completed', 'cancelled'].map((status) => (
-          <TouchableOpacity
-            key={status}
-            style={[styles.filterChip, filter === status && styles.filterChipActive]}
-            onPress={() => setFilter(status as any)}
-          >
-            <Text
-              style={[styles.filterChipText, filter === status && styles.filterChipTextActive]}
+      <View style={styles.filterWrapper}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterContent}
+        >
+          {[
+            { key: 'all', label: 'All' },
+            { key: 'pending', label: 'Pending' },
+            { key: 'confirmed', label: 'Confirmed' },
+            { key: 'completed', label: 'Completed' },
+            { key: 'cancelled', label: 'Cancelled' }
+          ].map(({ key, label }) => (
+            <TouchableOpacity
+              key={key}
+              style={[styles.filterChip, filter === key && styles.filterChipActive]}
+              onPress={() => setFilter(key as any)}
             >
-              {status.charAt(0).toUpperCase() + status.slice(1)}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+              <Text
+                style={[styles.filterChipText, filter === key && styles.filterChipTextActive]}
+              >
+                {label}
+              </Text>
+              {getStatusCount(key) > 0 && (
+                <View style={[styles.countBadge, filter === key && styles.countBadgeActive]}>
+                  <Text style={[styles.countText, filter === key && styles.countTextActive]}>
+                    {getStatusCount(key)}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
 
       <ScrollView
         style={styles.content}
@@ -100,11 +118,11 @@ export default function Bookings() {
           </View>
         ) : (
           filteredBookings.map((booking) => (
-            <View key={booking.id} style={styles.bookingCard}>
+            <View key={booking._id} style={styles.bookingCard}>
               <View style={styles.bookingHeader}>
                 <View style={styles.bookingInfo}>
-                  <Text style={styles.customerName}>{booking.customerName}</Text>
-                  <Text style={styles.serviceName}>{booking.serviceName}</Text>
+                  <Text style={styles.customerName}>{booking.service?.title}</Text>
+                  <Text style={styles.serviceName}>{booking.user?.name}</Text>
                 </View>
                 <View
                   style={[
@@ -122,26 +140,26 @@ export default function Bookings() {
               <View style={styles.bookingDetails}>
                 <View style={styles.detailRow}>
                   <Ionicons name="calendar" size={16} color="#6b7280" />
-                  <Text style={styles.detailText}>{booking.bookingDate}</Text>
+                  <Text style={styles.detailText}>{booking.date}</Text>
                 </View>
                 <View style={styles.detailRow}>
                   <Ionicons name="time" size={16} color="#6b7280" />
-                  <Text style={styles.detailText}>{booking.bookingTime}</Text>
+                  <Text style={styles.detailText}>{booking.time}</Text>
                 </View>
-                <View style={styles.detailRow}>
+                {/* <View style={styles.detailRow}>
                   <Ionicons name="cash" size={16} color="#6b7280" />
-                  <Text style={styles.detailText}>₹{booking.amount.toFixed(2)}</Text>
-                </View>
+                  <Text style={styles.detailText}>₹{booking.amount?.toFixed(2) || '0.00'}</Text>
+                </View> */}
               </View>
 
               <View style={styles.contactInfo}>
                 <View style={styles.contactRow}>
                   <Ionicons name="mail" size={14} color="#6b7280" />
-                  <Text style={styles.contactText}>{booking.customerEmail}</Text>
+                  <Text style={styles.contactText}>{booking.user?.email}</Text>
                 </View>
                 <View style={styles.contactRow}>
                   <Ionicons name="call" size={14} color="#6b7280" />
-                  <Text style={styles.contactText}>{booking.customerPhone}</Text>
+                  <Text style={styles.contactText}>{booking.user?.phone}</Text>
                 </View>
               </View>
 
@@ -149,13 +167,13 @@ export default function Bookings() {
                 <View style={styles.actions}>
                   <TouchableOpacity
                     style={[styles.actionButton, styles.confirmButton]}
-                    onPress={() => handleUpdateStatus(booking.id, 'confirmed')}
+                    onPress={() => handleUpdateStatus(booking._id, 'confirmed')}
                   >
                     <Text style={styles.confirmButtonText}>Confirm</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.actionButton, styles.cancelButton]}
-                    onPress={() => handleUpdateStatus(booking.id, 'cancelled')}
+                    onPress={() => handleUpdateStatus(booking._id, 'cancelled')}
                   >
                     <Text style={styles.cancelButtonText}>Cancel</Text>
                   </TouchableOpacity>
@@ -165,7 +183,7 @@ export default function Bookings() {
               {booking.status === 'confirmed' && (
                 <TouchableOpacity
                   style={[styles.actionButton, styles.completeButton]}
-                  onPress={() => handleUpdateStatus(booking.id, 'completed')}
+                  onPress={() => handleUpdateStatus(booking._id, 'completed')}
                 >
                   <Text style={styles.completeButtonText}>Mark as Completed</Text>
                 </TouchableOpacity>
@@ -186,13 +204,13 @@ const styles = StyleSheet.create({
   },
   header: {
     padding: 24,
-    paddingTop: 48,
+    paddingTop: 24,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
   },
   title: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: 'bold',
     color: '#1f2937',
   },
@@ -201,31 +219,56 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     marginTop: 4,
   },
-  filterContainer: {
+  filterWrapper: {
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
+    paddingVertical: 12,
   },
   filterContent: {
     paddingHorizontal: 24,
-    paddingVertical: 12,
     gap: 8,
+    alignItems: 'center',
   },
   filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
     backgroundColor: '#f3f4f6',
+    gap: 6,
+    height: 36,
   },
   filterChipActive: {
     backgroundColor: '#6366f1',
   },
   filterChipText: {
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: '600',
     color: '#6b7280',
   },
   filterChipTextActive: {
+    color: '#fff',
+  },
+  countBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#e5e7eb',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 5,
+  },
+  countBadgeActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  countText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#6b7280',
+  },
+  countTextActive: {
     color: '#fff',
   },
   content: {
@@ -251,12 +294,17 @@ const styles = StyleSheet.create({
   },
   bookingCard: {
     backgroundColor: '#fff',
-    margin: 16,
-    marginBottom: 0,
+    marginHorizontal: 16,
+    marginTop: 16,
     padding: 16,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#e5e7eb',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   bookingHeader: {
     flexDirection: 'row',
@@ -280,8 +328,8 @@ const styles = StyleSheet.create({
   },
   statusBadge: {
     paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
   },
   statusPending: {
     backgroundColor: '#fef3c7',
@@ -296,13 +344,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#fee2e2',
   },
   statusText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     color: '#1f2937',
     textTransform: 'capitalize',
   },
   bookingDetails: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 16,
     marginBottom: 12,
     paddingBottom: 12,
@@ -312,10 +361,10 @@ const styles = StyleSheet.create({
   detailRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 6,
   },
   detailText: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#6b7280',
     fontWeight: '500',
   },
@@ -326,20 +375,20 @@ const styles = StyleSheet.create({
   contactRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
   },
   contactText: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#6b7280',
   },
   actions: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 12,
   },
   actionButton: {
     flex: 1,
-    paddingVertical: 10,
-    borderRadius: 8,
+    paddingVertical: 12,
+    borderRadius: 10,
     alignItems: 'center',
   },
   confirmButton: {
