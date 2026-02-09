@@ -1,19 +1,18 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  RefreshControl,
-  Alert,
-} from 'react-native';
-import { useRouter } from 'expo-router';
+import { contactAPI } from '@/utils/api';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import {
+  Alert,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useAuthStore } from '../store/authStore';
-import { inquiryAPI } from '../utils/api';
 import { Inquiry } from '../types';
-import { format } from 'date-fns';
 
 export default function Inquiries() {
   const router = useRouter();
@@ -30,8 +29,8 @@ export default function Inquiries() {
     if (!vendor) return;
 
     try {
-      const response = await inquiryAPI.getInquiries(vendor.id);
-      setInquiries(response.data);
+      const response = await contactAPI.getAllContacts(vendor._id);
+      setInquiries(response.data.contacts);
     } catch (error) {
       console.error('Error loading inquiries:', error);
     } finally {
@@ -46,7 +45,7 @@ export default function Inquiries() {
 
   const handleUpdateStatus = async (inquiryId: string, status: string) => {
     try {
-      await inquiryAPI.updateInquiry(inquiryId, { status }, vendor!.id);
+      // await inquiryAPI.updateInquiry(inquiryId, { status }, vendor!.id);
       loadInquiries();
       Alert.alert('Success', 'Inquiry status updated');
     } catch (error) {
@@ -67,26 +66,28 @@ export default function Inquiries() {
         <Text style={styles.count}>{inquiries.length}</Text>
       </View>
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterContainer}
-        contentContainerStyle={styles.filterContent}
-      >
-        {['all', 'new', 'replied'].map((status) => (
-          <TouchableOpacity
-            key={status}
-            style={[styles.filterChip, filter === status && styles.filterChipActive]}
-            onPress={() => setFilter(status as any)}
-          >
-            <Text
-              style={[styles.filterChipText, filter === status && styles.filterChipTextActive]}
+      <View style={styles.filterContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}          
+          contentContainerStyle={styles.filterContent}
+        >
+          {['all', 'new', 'replied'].map((status) => (
+            <TouchableOpacity
+              key={status}
+              style={[styles.filterChip, filter === status && styles.filterChipActive]}
+              onPress={() => setFilter(status as any)}
             >
-              {status.charAt(0).toUpperCase() + status.slice(1)}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+              <Text
+                style={[styles.filterChipText, filter === status && styles.filterChipTextActive]}
+              >
+                {status.charAt(0).toUpperCase() + status.slice(1)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+
 
       <ScrollView
         style={styles.content}
@@ -188,17 +189,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
+    paddingVertical: 12,
   },
   filterContent: {
     paddingHorizontal: 24,
-    paddingVertical: 12,
     gap: 8,
+    alignItems: 'center',
   },
   filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
     backgroundColor: '#f3f4f6',
+    gap: 6,
+    height: 36,
   },
   filterChipActive: {
     backgroundColor: '#6366f1',

@@ -101,7 +101,11 @@ export default function Services() {
             <View key={service._id} style={styles.serviceCard}>
               <View style={styles.serviceHeader}>
                 <View style={styles.serviceIcon}>
-                  <Image source={{ uri:service.images.url }} resizeMode='contain' />
+                 {service.image?.url ?(
+                  <Image source={{uri : service.image?.url}} style={styles.serviceImage}/>
+                 ):(
+                  <View></View>
+                 )}
                 </View>
                 <View style={styles.serviceInfo}>
                   <Text style={styles.serviceName}>{service.title}</Text>
@@ -179,12 +183,15 @@ const styles = StyleSheet.create({
   serviceIcon: {
     width: 48,
     height: 48,
-    backgroundColor: '#ede9fe',
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
     marginRight: 12
+  },
+  serviceImage:{
+    height:48,
+    width:48
   },
   title: {
     fontSize: 24,

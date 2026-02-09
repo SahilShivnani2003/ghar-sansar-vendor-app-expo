@@ -26,8 +26,7 @@ export default function Bookings() {
     if (!vendor) return;
 
     try {
-      // const response = await bookingAPI.getVendorBookings(vendor.id);
-      const response = await bookingAPI.getAllBookings();
+      const response = await bookingAPI.getVendorBookings(vendor._id);
       setBookings(response.data.bookings || []);
     } catch (error) {
       console.error('Error loading bookings:', error);

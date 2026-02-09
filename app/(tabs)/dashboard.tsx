@@ -154,7 +154,11 @@ export default function Dashboard() {
                 {purchasedCategories.map((category) => (
                   <View key={category._id} style={styles.categoryCard}>
                     <View style={styles.categoryIcon}>
-                      <Image source={{uri:category.image}} resizeMode='contain'/>
+                      {category.image ? (
+                        <Image source={{ uri: category.image }} style={styles.categoryImage} />
+                      ) : (
+                        <View></View>
+                      )}
                     </View>
                     <Text style={styles.categoryName}>{category.name}</Text>
                     <Text style={styles.categoryPrice}>₹{category.price}</Text>
@@ -169,7 +173,11 @@ export default function Dashboard() {
             {categories.map((category) => (
               <View key={category._id} style={styles.categoryCard}>
                 <View style={styles.categoryIcon}>
-                  <Image source={{uri:category.image}} resizeMode='contain'/>
+                  {category.image ? (
+                    <Image source={{ uri: category.image }} style={styles.categoryImage} />
+                  ) : (
+                    <View></View>
+                  )}
                 </View>
                 <Text style={styles.categoryName}>{category.name}</Text>
                 <Text style={styles.categoryPrice}>₹{category.price}</Text>
@@ -399,6 +407,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  categoryImage: {
+    height: 48,
+    width: 48
+  },
   tabContainer: {
     flexDirection: 'row',
     backgroundColor: '#fff',
@@ -448,7 +460,6 @@ const styles = StyleSheet.create({
   categoryIcon: {
     width: 48,
     height: 48,
-    backgroundColor: '#ede9fe',
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',

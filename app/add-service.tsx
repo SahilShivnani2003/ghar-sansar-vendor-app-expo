@@ -95,10 +95,16 @@ export default function AddService({ serviceId }: { serviceId?: string }) {
     setLoading(true);
     try {
       const submitData = {
-        ...formData,
-        price: parseFloat(formData.price),
-        vendorId: vendor.id,
+        title:formData.name,
+        price:formData.price,
+        location:formData.location,
+        type:"home",
+        category: formData.category,
+        description:formData.description,
+        images:"[]",
+        vendor:vendor._id
       };
+      debugger
 
       if (serviceId) {
         await propertyAPI.updateProperty(serviceId, submitData);
@@ -106,8 +112,9 @@ export default function AddService({ serviceId }: { serviceId?: string }) {
       } else {
         await propertyAPI.createProperty(submitData);
         Alert.alert('Success', 'Service created successfully');
+        
       }
-
+      loadCategories();
       router.back();
     } catch (error) {
       Alert.alert('Error', serviceId ? 'Failed to update service' : 'Failed to create service');
