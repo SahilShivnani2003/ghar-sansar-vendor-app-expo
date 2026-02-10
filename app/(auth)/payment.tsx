@@ -1,31 +1,43 @@
+import { BASE_URL, categoryAPI } from '@/utils/api';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import axios from 'axios';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
-import { useAuthStore } from '../../store/authStore';
+import RazorpayCheckout from 'react-native-razorpay';
 
 type PaymentMethod = 'cash' | 'upi';
 
 export default function Payment() {
+  
   const router = useRouter();
-  const vendor = useAuthStore((state) => state.vendor);
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod | null>(null);
   const [loading, setLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const rawParams = useLocalSearchParams();
+  debugger
+  const vendor = rawParams.vendor
+    ? JSON.parse(rawParams.vendor as string)
+    : null;
 
+  const categoryData = rawParams.category
+    ? JSON.parse(rawParams.category as string)
+    : null;
+
+  const category = categoryData[0];
   // This would come from your backend/config
-  const registrationFee = 500;
-  const categoryName = vendor?.category || 'Service Category';
+  const registrationFee = category.price || 1;
+  const categoryName = category.name || 'Service Category';
 
   const handlePayment = async () => {
     if (!selectedMethod) {
@@ -33,35 +45,104 @@ export default function Payment() {
       return;
     }
 
+    if (!vendor || !category) {
+      Alert.alert('Error', 'Invalid vendor or category data');
+      return;
+    }
+
     if (selectedMethod === 'cash') {
-      // For cash payment
-      Alert.alert(
-        'Cash Payment Selected',
-        'You can login once admin approves your payment. Our team will contact you soon.',
-        [
-          {
-            text: 'OK',
-            onPress: () => router.replace('/(auth)/login')
-          }
-        ]
-      );
-    } else {
-      // For UPI payment
-      setLoading(true);
-      
-      // Simulate payment processing
-      setTimeout(() => {
+      try {
+        setLoading(true);
+        debugger
+        await categoryAPI.purchaseCategory({
+          vendorId: vendor._id,
+          categoryId: category._id,
+          paymentMethod: 'cash',
+        });
+
+        Alert.alert(
+          'Cash Payment Selected',
+          'You can login once admin approves your payment. Our team will contact you soon.',
+          [{ text: 'OK', onPress: () => router.replace('/(auth)/login') }]
+        );
+      } catch (err) {
+        Alert.alert('Error', 'Failed to submit cash payment request');
+      } finally {
         setLoading(false);
-        setShowSuccessModal(true);
-        
-        // After showing success, navigate to login
-        setTimeout(() => {
-          setShowSuccessModal(false);
-          router.replace('/(auth)/login');
-        }, 2500);
-      }, 2000);
+      }
+    } else {
+      handleUpiPayment();
     }
   };
+
+
+  const handleUpiPayment = async () => {
+    try {
+      if (!registrationFee) {
+        Alert.alert('Error', 'Category price not found');
+        return;
+      }
+
+      setLoading(true);
+
+      const response = await axios.post(
+        `${BASE_URL}/razorpay/capturePayment`,
+        { amount: registrationFee }
+      );
+
+      const data = response.data;
+      if (!data?.order) throw new Error('Failed to initiate payment');
+
+      const options = {
+        key: 'rzp_live_S4TPRyX5ae0LZA',
+        amount: data.order.amount,
+        currency: data.order.currency,
+        name: 'Mera GharSansaar',
+        description: 'Purchase Category',
+        order_id: data.order.id,
+
+        handler: async (response: any) => {
+          try {
+            const verifyResponse = await axios.post(
+              `${BASE_URL}/razorpay/verifyPayment`,
+              {
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_signature: response.razorpay_signature,
+                vendorId: vendor._id,
+                categoryId: category._id,
+                paymentMode: 'prepaid',
+              }
+            );
+
+            if (verifyResponse?.data?.success) {
+              setShowSuccessModal(true);
+
+              setTimeout(() => {
+                setShowSuccessModal(false);
+                router.replace('/(auth)/login');
+              }, 2500);
+            } else {
+              Alert.alert('Payment Failed', 'Payment verification failed');
+            }
+          } catch (err) {
+            Alert.alert('Error', 'Payment verification error');
+          }
+        },
+
+        theme: { color: '#f59e0b' },
+      };
+
+      // ⚠️ Call Razorpay SDK here
+      RazorpayCheckout.open(options);
+
+    } catch (error) {
+      Alert.alert('Error', 'UPI payment failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
 
   return (
     <View style={styles.container}>
@@ -118,7 +199,7 @@ export default function Payment() {
                   <View style={styles.radioButtonInner} />
                 )}
               </View>
-              
+
               <View style={styles.paymentInfo}>
                 <View style={styles.paymentHeader}>
                   <Ionicons name="phone-portrait-outline" size={24} color="#8b5cf6" />
@@ -140,7 +221,7 @@ export default function Payment() {
               </View>
             </View>
 
-            {selectedMethod === 'upi' && (
+            {/* {selectedMethod === 'upi' && (
               <View style={styles.upiDetailsContainer}>
                 <View style={styles.divider} />
                 <View style={styles.upiDetails}>
@@ -159,7 +240,7 @@ export default function Payment() {
                   <Text style={styles.qrText}>UPI QR Code</Text>
                 </View>
               </View>
-            )}
+            )} */}
           </TouchableOpacity>
 
           {/* Cash Option */}
@@ -180,7 +261,7 @@ export default function Payment() {
                   <View style={styles.radioButtonInner} />
                 )}
               </View>
-              
+
               <View style={styles.paymentInfo}>
                 <View style={styles.paymentHeader}>
                   <Ionicons name="cash-outline" size={24} color="#10b981" />
@@ -198,7 +279,7 @@ export default function Payment() {
               </View>
             </View>
 
-            {selectedMethod === 'cash' && (
+            {/* {selectedMethod === 'cash' && (
               <View style={styles.cashDetailsContainer}>
                 <View style={styles.divider} />
                 <View style={styles.infoBox}>
@@ -226,7 +307,7 @@ export default function Payment() {
                   </View>
                 </View>
               </View>
-            )}
+            )} */}
           </TouchableOpacity>
         </View>
 

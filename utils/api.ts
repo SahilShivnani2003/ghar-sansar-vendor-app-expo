@@ -1,7 +1,10 @@
 import axios from 'axios';
 
-///const BASE_URL = "https://api.meragharsansaar.com/api/v1"
-const BASE_URL = "http://localhost:8000/api/v1"
+export const BASE_URL = "https://api.meragharsansaar.com/api/v1"
+
+// Testing Url
+//export const BASE_URL = "https://service-provider-71d6.onrender.com/api/v1"
+
 const api = axios.create({
   baseURL: BASE_URL,
   headers: {

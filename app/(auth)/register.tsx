@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   Image,
@@ -13,61 +13,69 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { useAuthStore } from '../../store/authStore';
-import { authAPI } from '../../utils/api';
+import { categoryAPI, vendorAPI } from '../../utils/api';
 
 type Step = 'basic' | 'contact' | 'business' | 'bank' | 'experience' | 'documents' | 'credentials';
 
 export default function Register() {
   const router = useRouter();
-  const setVendor = useAuthStore((state) => state.setVendor);
+  const [vendor, setVendor] = useState({});
   const [currentStep, setCurrentStep] = useState<Step>('basic');
+  const [categories, setCategories] = useState<any[]>([]);
+  const [loadingCategories, setLoadingCategories] = useState(true);
   const [formData, setFormData] = useState({
     // Basic Info
-    businessName: '',
-    serviceType: '',
-    serviceDescription: '',
-    category: '',
-    ownerName: '',
-    
+    name: '',
+    company: '',
+    description: '',
+    typeOfService: '',
+    category: '',        // stores _id for submission
+    categoryName: '',    // stores display name for UI
+    subCategory: '',
+    status: 'pending',
+    yearOfEstablishment: '',
+
     // Contact
     email: '',
     phone: '',
+    alternatePhone: '',
+    whatsappNumber: '',
     address: '',
-    city: '',
-    state: '',
-    pincode: '',
-    
+    serviceLocation: '',
+
     // Business
+    businessType: '',
+    adhar: '',
+    pan: '',
     gstNumber: '',
-    panNumber: '',
-    registrationType: '',
-    
-    // Bank Details
-    accountHolderName: '',
+    tradeLicense: '',
+
+    // Bank — bankName lives at top level per API; bankDetail has IFSC + branch
     bankName: '',
+    accountHolderName: '',
     accountNumber: '',
     confirmAccountNumber: '',
-    ifscCode: '',
-    branch: '',
-    
-    // Experience
-    yearsOfExperience: '',
-    specialization: '',
+    bankDetail: {
+      accountNumber: '',
+      IFSC: '',
+      accountHolderName: '',
+      branch: '',
+    },
+
+    // Experience & Availability
+    // experience submitted as { totalYears: number, fields: [] }
+    totalYears: '',       // top-level copy per API body
+    numberOfStaff: 0,
+    servicesOffered: '',
     workingDays: [] as string[],
-    workingHoursFrom: '',
-    workingHoursTo: '',
-    serviceRadius: '',
-    
-    // Documents
+    workingTimings: '',
+
+    // Documents (optional)
     documents: {
-      idProof: null as any,
       addressProof: null as any,
-      businessRegistration: null as any,
-      taxDocument: null as any,
       profilePhoto: null as any,
     },
-    
+
     // Credentials
     password: '',
     confirmPassword: '',
@@ -75,6 +83,8 @@ export default function Register() {
     referralName: '',
   });
   const [loading, setLoading] = useState(false);
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+  const [hasWhatsapp, setHasWhatsapp] = useState<boolean | null>(null);
 
   const steps = [
     { id: 'basic', title: 'Basic Info', icon: 'information-circle-outline' },
@@ -86,18 +96,77 @@ export default function Register() {
     { id: 'credentials', title: 'Credentials', icon: 'lock-closed-outline' },
   ];
 
+  useEffect(() => {
+    fetchCategories();
+  }, []);
+
+  const fetchCategories = async () => {
+    try {
+      setLoadingCategories(true);
+      const response = await categoryAPI.getAllCategories();
+      setCategories(response.data.categories || []);
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+      Alert.alert('Error', 'Failed to load categories. Please try again.');
+    } finally {
+      setLoadingCategories(false);
+    }
+  };
+
   const getCurrentStepIndex = () => steps.findIndex(s => s.id === currentStep);
   const progress = ((getCurrentStepIndex() + 1) / steps.length) * 100;
 
+  const handleCategorySelect = (cat: any) => {
+    setFormData({
+      ...formData,
+      category: cat._id,         // _id sent to API
+      categoryName: cat.name,    // name shown in UI
+      subCategory: cat.autoFilled || ''
+    });
+    setShowCategoryDropdown(false);
+  };
+
+  const getSubCategories = (): string[] => {
+    const selectedCategory = categories.find(cat => cat._id === formData.category);
+    return selectedCategory?.autoFilled || [];
+  };
+
   const handleNext = () => {
-    // Validation for current step
     if (currentStep === 'basic') {
-      if (!formData.businessName || !formData.serviceType || !formData.ownerName) {
+      if (!formData.company || !formData.typeOfService || !formData.name) {
         Alert.alert('Required Fields', 'Please fill all required fields');
         return;
       }
     }
-    
+    if (currentStep === 'contact') {
+      if ( !formData.phone || !formData.address) {
+        Alert.alert('Required Fields', 'Please fill all required fields');
+        return;
+      }
+      if (hasWhatsapp === null) {
+        Alert.alert('Required Fields', 'Please indicate if you have WhatsApp');
+        return;
+      }
+    }
+    if (currentStep === 'business') {
+      if (!formData.businessType) {
+        Alert.alert('Required Fields', 'Please fill all required fields');
+        return;
+      }
+    }
+    if (currentStep === 'bank') {
+      if (formData.accountNumber !== formData.confirmAccountNumber) {
+        Alert.alert('Error', 'Account numbers do not match');
+        return;
+      }
+    }
+    if (currentStep === 'experience') {
+      if (!formData.workingDays.length) {
+        Alert.alert('Required Fields', 'Please select at least one working day');
+        return;
+      }
+    }
+
     const currentIndex = getCurrentStepIndex();
     if (currentIndex < steps.length - 1) {
       setCurrentStep(steps[currentIndex + 1].id as Step);
@@ -119,59 +188,129 @@ export default function Register() {
 
     setLoading(true);
     try {
-      const { confirmPassword, ...registerData } = formData;
-      const response = await authAPI.register(registerData);
-      await setVendor(response.data);
-      // Navigate to payment page instead of dashboard
-      router.push('/(auth)/payment');
+      // Build workingDays string: "Mon, Tue, Wed | 9 AM - 7 PM"
+      const workingDaysStr = formData.workingDays.length
+        ? `${formData.workingDays.join(', ')} | ${formData.workingTimings}`
+        : '';
+
+      const totalYearsNum = parseInt(formData.totalYears) || 0;
+
+      const registerData = {
+        company: formData.company,
+        typeOfService: formData.typeOfService,
+        description: formData.description,
+        yearOfEstablishment: formData.yearOfEstablishment,
+        name: formData.name,
+        address: formData.address,
+        serviceLocation: formData.serviceLocation,
+        phone: formData.phone,
+        alternatePhone: formData.alternatePhone,
+        whatsappNumber: formData.whatsappNumber,
+        email: formData.email,
+        businessType: formData.businessType,
+        gstNumber: formData.gstNumber,
+        pan: formData.pan,
+        adhar: formData.adhar,
+        tradeLicense: formData.tradeLicense,
+        // Bank: top-level fields + bankDetail object
+        bankName: formData.bankName,
+        accountHolderName: formData.accountHolderName,
+        accountNumber: formData.accountNumber,
+        ifscCode:formData.bankDetail.IFSC,
+        bankDetail: {
+          accountNumber: formData.bankDetail.accountNumber,
+          IFSC: formData.bankDetail.IFSC,
+          accountHolderName: formData.bankDetail.accountHolderName,
+          branch: formData.bankDetail.branch,
+        },
+        // Experience
+        totalYears: String(totalYearsNum),
+        numberOfStaff: formData.numberOfStaff,
+        servicesOffered: formData.servicesOffered,
+        workingDays: workingDaysStr,
+        experience: {
+          totalYears: totalYearsNum,
+          fields: [],
+        },
+        // Credentials
+        password: formData.password,
+        confirmPassword:formData.confirmPassword,
+        referralCode: formData.referralCode,
+        referralName: formData.referralName,
+        // Category (send _id)
+        category: formData.category,
+        subCategory: formData.subCategory,
+        status: "pending",
+      };
+
+      debugger
+      const response = await vendorAPI.register(registerData);
+      debugger
+      setVendor(response.data.user)
+
+      router.push({
+        pathname: '/(auth)/payment',
+        params: {
+          vendor: JSON.stringify(response.data.user),
+          category: JSON.stringify(categories),
+        },
+      });
     } catch (error: any) {
+      console.log('Error from vendor register: ', error);
       Alert.alert('Error', error.response?.data?.detail || 'Registration failed');
     } finally {
       setLoading(false);
     }
   };
 
+  // ─── BASIC INFO ───────────────────────────────────────────────────────────────
   const renderBasicInfo = () => (
     <View style={styles.formSection}>
       <Text style={styles.sectionTitle}>Tell us about your business</Text>
-      
+
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>Business Name <Text style={styles.required}>*</Text></Text>
+        <Text style={styles.label}>
+          Service Provider / Business Name <Text style={styles.required}>*</Text>
+        </Text>
         <View style={styles.inputWrapper}>
           <Ionicons name="business-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
           <TextInput
             style={styles.input}
             placeholder="Enter your business name"
             placeholderTextColor="#9ca3af"
-            value={formData.businessName}
-            onChangeText={(text) => setFormData({ ...formData, businessName: text })}
+            value={formData.company}
+            onChangeText={(text) => setFormData({ ...formData, company: text })}
           />
         </View>
       </View>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>Service Type <Text style={styles.required}>*</Text></Text>
+        <Text style={styles.label}>
+          Type of Service <Text style={styles.required}>*</Text>
+        </Text>
         <View style={styles.inputWrapper}>
           <Ionicons name="construct-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
           <TextInput
             style={styles.input}
             placeholder="e.g., Plumbing, Electrical, Carpentry"
             placeholderTextColor="#9ca3af"
-            value={formData.serviceType}
-            onChangeText={(text) => setFormData({ ...formData, serviceType: text })}
+            value={formData.typeOfService}
+            onChangeText={(text) => setFormData({ ...formData, typeOfService: text })}
           />
         </View>
       </View>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>Service Description</Text>
+        <Text style={styles.label}>
+          Service Description <Text style={styles.required}>*</Text>
+        </Text>
         <View style={[styles.inputWrapper, styles.textAreaWrapper]}>
           <TextInput
             style={[styles.input, styles.textArea]}
             placeholder="Describe your services..."
             placeholderTextColor="#9ca3af"
-            value={formData.serviceDescription}
-            onChangeText={(text) => setFormData({ ...formData, serviceDescription: text })}
+            value={formData.description}
+            onChangeText={(text) => setFormData({ ...formData, description: text })}
             multiline
             numberOfLines={4}
           />
@@ -179,57 +318,131 @@ export default function Register() {
       </View>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>Service Category <Text style={styles.required}>*</Text></Text>
-        <View style={styles.inputWrapper}>
+        <Text style={styles.label}>Category (Service)</Text>
+        <TouchableOpacity
+          style={styles.dropdownWrapper}
+          onPress={() => setShowCategoryDropdown(!showCategoryDropdown)}
+        >
           <Ionicons name="grid-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
+          <Text style={[styles.dropdownText, !formData.category && styles.placeholderText]}>
+            {formData.categoryName || 'Select Category'}
+          </Text>
+          <Ionicons name="chevron-down-outline" size={20} color="#9ca3af" />
+        </TouchableOpacity>
+
+        {showCategoryDropdown && (
+          <ScrollView style={styles.dropdownList} nestedScrollEnabled={true}>
+            {loadingCategories ? (
+              <View style={styles.dropdownItem}>
+                <Text style={styles.dropdownItemText}>Loading categories...</Text>
+              </View>
+            ) : categories.length === 0 ? (
+              <View style={styles.dropdownItem}>
+                <Text style={styles.dropdownItemText}>No categories available</Text>
+              </View>
+            ) : (
+              categories.map((cat) => (
+                <TouchableOpacity
+                  key={cat._id}
+                  style={styles.dropdownItem}
+                  onPress={() => handleCategorySelect(cat)}
+                >
+                  <Text style={styles.dropdownItemText}>{cat.name}</Text>
+                </TouchableOpacity>
+              ))
+            )}
+          </ScrollView>
+        )}
+      </View>
+
+      <View style={styles.inputGroup}>
+        <Text style={styles.label}>Category (Auto-filled)</Text>
+        <View style={[styles.dropdownWrapper, styles.readOnlyField]}>
+          <Ionicons name="list-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
+          <Text style={[styles.dropdownText, !formData.subCategory && styles.placeholderText]}>
+            {formData.subCategory || 'Auto-filled based on category'}
+          </Text>
+          <Ionicons name="lock-closed-outline" size={18} color="#9ca3af" />
+        </View>
+        {formData.category && getSubCategories().length > 0 && (
+          <Text style={styles.helperText}>Available: {getSubCategories()}</Text>
+        )}
+      </View>
+
+      <View style={styles.inputGroup}>
+        <Text style={styles.label}>Year of Establishment</Text>
+        <View style={styles.inputWrapper}>
+          <Ionicons name="calendar-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
           <TextInput
             style={styles.input}
-            placeholder="Select or enter category"
+            placeholder="YYYY"
             placeholderTextColor="#9ca3af"
-            value={formData.category}
-            onChangeText={(text) => setFormData({ ...formData, category: text })}
+            value={formData.yearOfEstablishment}
+            onChangeText={(text) => setFormData({ ...formData, yearOfEstablishment: text })}
+            keyboardType="numeric"
+            maxLength={4}
           />
         </View>
       </View>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>Owner Name <Text style={styles.required}>*</Text></Text>
+        <Text style={styles.label}>
+          Owner / Authorized Person Name <Text style={styles.required}>*</Text>
+        </Text>
         <View style={styles.inputWrapper}>
           <Ionicons name="person-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
           <TextInput
             style={styles.input}
-            placeholder="Full name of owner"
+            placeholder="Full name of owner / authorized person"
             placeholderTextColor="#9ca3af"
-            value={formData.ownerName}
-            onChangeText={(text) => setFormData({ ...formData, ownerName: text })}
+            value={formData.name}
+            onChangeText={(text) => setFormData({ ...formData, name: text })}
           />
         </View>
       </View>
     </View>
   );
 
+  // ─── CONTACT ──────────────────────────────────────────────────────────────────
   const renderContact = () => (
     <View style={styles.formSection}>
       <Text style={styles.sectionTitle}>How can customers reach you?</Text>
-      
+
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>Email Address <Text style={styles.required}>*</Text></Text>
-        <View style={styles.inputWrapper}>
-          <Ionicons name="mail-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
+        <Text style={styles.label}>
+          Registered Office / Home Address <Text style={styles.required}>*</Text>
+        </Text>
+        <View style={[styles.inputWrapper, styles.textAreaWrapper]}>
           <TextInput
-            style={styles.input}
-            placeholder="your.email@example.com"
+            style={[styles.input, styles.textArea]}
+            placeholder="Complete registered address"
             placeholderTextColor="#9ca3af"
-            value={formData.email}
-            onChangeText={(text) => setFormData({ ...formData, email: text })}
-            keyboardType="email-address"
-            autoCapitalize="none"
+            value={formData.address}
+            onChangeText={(text) => setFormData({ ...formData, address: text })}
+            multiline
+            numberOfLines={3}
           />
         </View>
       </View>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>Phone Number <Text style={styles.required}>*</Text></Text>
+        <Text style={styles.label}>Service Location / Area Covered</Text>
+        <View style={styles.inputWrapper}>
+          <Ionicons name="location-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
+          <TextInput
+            style={styles.input}
+            placeholder="e.g., Mumbai, Thane, Navi Mumbai"
+            placeholderTextColor="#9ca3af"
+            value={formData.serviceLocation}
+            onChangeText={(text) => setFormData({ ...formData, serviceLocation: text })}
+          />
+        </View>
+      </View>
+
+      <View style={styles.inputGroup}>
+        <Text style={styles.label}>
+          Primary Contact Number <Text style={styles.required}>*</Text>
+        </Text>
         <View style={styles.inputWrapper}>
           <Ionicons name="call-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
           <TextInput
@@ -244,148 +457,233 @@ export default function Register() {
       </View>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>Business Address <Text style={styles.required}>*</Text></Text>
-        <View style={[styles.inputWrapper, styles.textAreaWrapper]}>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            placeholder="Complete business address"
-            placeholderTextColor="#9ca3af"
-            value={formData.address}
-            onChangeText={(text) => setFormData({ ...formData, address: text })}
-            multiline
-            numberOfLines={3}
-          />
-        </View>
-      </View>
-
-      <View style={styles.row}>
-        <View style={[styles.inputGroup, styles.flex1]}>
-          <Text style={styles.label}>City <Text style={styles.required}>*</Text></Text>
-          <View style={styles.inputWrapper}>
-            <TextInput
-              style={styles.input}
-              placeholder="City"
-              placeholderTextColor="#9ca3af"
-              value={formData.city}
-              onChangeText={(text) => setFormData({ ...formData, city: text })}
-            />
-          </View>
-        </View>
-
-        <View style={[styles.inputGroup, styles.flex1]}>
-          <Text style={styles.label}>State <Text style={styles.required}>*</Text></Text>
-          <View style={styles.inputWrapper}>
-            <TextInput
-              style={styles.input}
-              placeholder="State"
-              placeholderTextColor="#9ca3af"
-              value={formData.state}
-              onChangeText={(text) => setFormData({ ...formData, state: text })}
-            />
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.inputGroup}>
-        <Text style={styles.label}>PIN Code <Text style={styles.required}>*</Text></Text>
+        <Text style={styles.label}>Alternate Contact Number</Text>
         <View style={styles.inputWrapper}>
-          <Ionicons name="location-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
+          <Ionicons name="call-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
           <TextInput
             style={styles.input}
-            placeholder="XXXXXX"
+            placeholder="+91 XXXXX XXXXX"
             placeholderTextColor="#9ca3af"
-            value={formData.pincode}
-            onChangeText={(text) => setFormData({ ...formData, pincode: text })}
-            keyboardType="numeric"
-            maxLength={6}
-          />
-        </View>
-      </View>
-    </View>
-  );
-
-  const renderBusiness = () => (
-    <View style={styles.formSection}>
-      <Text style={styles.sectionTitle}>Business Details</Text>
-      
-      <View style={styles.inputGroup}>
-        <Text style={styles.label}>Business Registration Type</Text>
-        <View style={styles.inputWrapper}>
-          <Ionicons name="business-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="e.g., Proprietorship, Partnership, LLP, Pvt Ltd"
-            placeholderTextColor="#9ca3af"
-            value={formData.registrationType}
-            onChangeText={(text) => setFormData({ ...formData, registrationType: text })}
+            value={formData.alternatePhone}
+            onChangeText={(text) => setFormData({ ...formData, alternatePhone: text })}
+            keyboardType="phone-pad"
           />
         </View>
       </View>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>GST Number (Optional)</Text>
-        <View style={styles.inputWrapper}>
-          <Ionicons name="document-text-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="22AAAAA0000A1Z5"
-            placeholderTextColor="#9ca3af"
-            value={formData.gstNumber}
-            onChangeText={(text) => setFormData({ ...formData, gstNumber: text.toUpperCase() })}
-            autoCapitalize="characters"
-            maxLength={15}
-          />
-        </View>
-      </View>
-
-      <View style={styles.inputGroup}>
-        <Text style={styles.label}>PAN Number (Optional)</Text>
-        <View style={styles.inputWrapper}>
-          <Ionicons name="card-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="ABCDE1234F"
-            placeholderTextColor="#9ca3af"
-            value={formData.panNumber}
-            onChangeText={(text) => setFormData({ ...formData, panNumber: text.toUpperCase() })}
-            autoCapitalize="characters"
-            maxLength={10}
-          />
-        </View>
-      </View>
-
-      <View style={styles.infoBox}>
-        <Ionicons name="information-circle" size={20} color="#3b82f6" />
-        <Text style={styles.infoText}>
-          GST and PAN details are optional but recommended for building trust with customers.
+        <Text style={styles.label}>
+          Do you have WhatsApp? <Text style={styles.required}>*</Text>
         </Text>
+        <View style={styles.whatsappToggleRow}>
+          <TouchableOpacity
+            style={[styles.toggleOption, hasWhatsapp === true && styles.toggleOptionSelected]}
+            onPress={() => {
+              setHasWhatsapp(true);
+              setFormData({ ...formData, whatsappNumber: formData.phone });
+            }}
+          >
+            <Ionicons
+              name="logo-whatsapp"
+              size={18}
+              color={hasWhatsapp === true ? '#fff' : '#25d366'}
+            />
+            <Text style={[styles.toggleOptionText, hasWhatsapp === true && styles.toggleOptionTextSelected]}>
+              Yes
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.toggleOption, hasWhatsapp === false && styles.toggleOptionNo]}
+            onPress={() => {
+              setHasWhatsapp(false);
+              setFormData({ ...formData, whatsappNumber: '' });
+            }}
+          >
+            <Ionicons
+              name="close-circle-outline"
+              size={18}
+              color={hasWhatsapp === false ? '#fff' : '#6b7280'}
+            />
+            <Text style={[styles.toggleOptionText, hasWhatsapp === false && styles.toggleOptionTextSelected]}>
+              No
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {hasWhatsapp === true && (
+          <View style={[styles.inputWrapper, { marginTop: 10 }]}>
+            <Ionicons name="logo-whatsapp" size={20} color="#25d366" style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="WhatsApp Number"
+              placeholderTextColor="#9ca3af"
+              value={formData.whatsappNumber}
+              onChangeText={(text) => setFormData({ ...formData, whatsappNumber: text })}
+              keyboardType="phone-pad"
+            />
+          </View>
+        )}
+      </View>
+
+      <View style={styles.inputGroup}>
+        <Text style={styles.label}>
+          Email ID 
+        </Text>
+        <View style={styles.inputWrapper}>
+          <Ionicons name="mail-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
+          <TextInput
+            style={styles.input}
+            placeholder="your.email@example.com"
+            placeholderTextColor="#9ca3af"
+            value={formData.email}
+            onChangeText={(text) => setFormData({ ...formData, email: text })}
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
+        </View>
       </View>
     </View>
   );
+
+  // ─── BUSINESS ─────────────────────────────────────────────────────────────────
+  const renderBusiness = () => {
+    const businessTypes = ['Proprietorship', 'Partnership', 'LLP', 'Private Limited', 'Other'];
+
+    return (
+      <View style={styles.formSection}>
+        <Text style={styles.sectionTitle}>Business Details</Text>
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>
+            Business Type <Text style={styles.required}>*</Text>
+          </Text>
+          <View style={styles.businessTypeContainer}>
+            {businessTypes.map((type) => (
+              <TouchableOpacity
+                key={type}
+                style={styles.radioOption}
+                onPress={() => setFormData({ ...formData, businessType: type })}
+              >
+                <View style={styles.radioCircle}>
+                  {formData.businessType === type && <View style={styles.radioSelected} />}
+                </View>
+                <Text style={styles.radioLabel}>{type}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Aadhaar Number</Text>
+          <View style={styles.inputWrapper}>
+            <Ionicons name="card-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="XXXX XXXX XXXX"
+              placeholderTextColor="#9ca3af"
+              value={formData.adhar}
+              onChangeText={(text) => setFormData({ ...formData, adhar: text })}
+              keyboardType="numeric"
+              maxLength={14}
+            />
+          </View>
+        </View>
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>
+            PAN Number 
+          </Text>
+          <View style={styles.inputWrapper}>
+            <Ionicons name="document-text-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="ABCDE1234F"
+              placeholderTextColor="#9ca3af"
+              value={formData.pan}
+              onChangeText={(text) => setFormData({ ...formData, pan: text.toUpperCase() })}
+              autoCapitalize="characters"
+              maxLength={10}
+            />
+          </View>
+        </View>
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>GST Number (if applicable)</Text>
+          <View style={styles.inputWrapper}>
+            <Ionicons name="receipt-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="22AAAAA0000A1Z5"
+              placeholderTextColor="#9ca3af"
+              value={formData.gstNumber}
+              onChangeText={(text) => setFormData({ ...formData, gstNumber: text.toUpperCase() })}
+              autoCapitalize="characters"
+              maxLength={15}
+            />
+          </View>
+        </View>
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Trade License / Shop Act Registration No.</Text>
+          <View style={styles.inputWrapper}>
+            <Ionicons name="ribbon-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Enter license / registration number"
+              placeholderTextColor="#9ca3af"
+              value={formData.tradeLicense}
+              onChangeText={(text) => setFormData({ ...formData, tradeLicense: text })}
+            />
+          </View>
+        </View>
+
+        <View style={styles.infoBox}>
+          <Ionicons name="information-circle" size={20} color="#3b82f6" />
+          <Text style={styles.infoText}>
+            Aadhaar, GST, and Trade License details help build trust with customers and speed up verification.
+          </Text>
+        </View>
+      </View>
+    );
+  };
+
+  // ─── BANK ─────────────────────────────────────────────────────────────────────
+  // All fields sync to both top-level keys AND bankDetail object to match API body
+  const syncBank = (field: string, value: string) => {
+    const topLevel: Record<string, string> = {};
+    const detailUpdate: Record<string, string> = {};
+
+    if (field === 'bankName') {
+      topLevel.bankName = value;
+    } else if (field === 'accountHolderName') {
+      topLevel.accountHolderName = value;
+      detailUpdate.accountHolderName = value;
+    } else if (field === 'accountNumber') {
+      topLevel.accountNumber = value;
+      detailUpdate.accountNumber = value;
+    } else if (field === 'confirmAccountNumber') {
+      topLevel.confirmAccountNumber = value;
+    } else if (field === 'IFSC') {
+      detailUpdate.IFSC = value.toUpperCase();
+    } else if (field === 'branch') {
+      detailUpdate.branch = value;
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      ...topLevel,
+      bankDetail: { ...prev.bankDetail, ...detailUpdate },
+    }));
+  };
 
   const renderBank = () => (
     <View style={styles.formSection}>
       <Text style={styles.sectionTitle}>Bank Account Details</Text>
-      <Text style={styles.sectionDescription}>
-        For receiving payments from customers
-      </Text>
-      
-      <View style={styles.inputGroup}>
-        <Text style={styles.label}>Account Holder Name <Text style={styles.required}>*</Text></Text>
-        <View style={styles.inputWrapper}>
-          <Ionicons name="person-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="As per bank records"
-            placeholderTextColor="#9ca3af"
-            value={formData.accountHolderName}
-            onChangeText={(text) => setFormData({ ...formData, accountHolderName: text })}
-          />
-        </View>
-      </View>
+      <Text style={styles.sectionDescription}>For receiving payments from customers</Text>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>Bank Name <Text style={styles.required}>*</Text></Text>
+        <Text style={styles.label}>Bank Name</Text>
         <View style={styles.inputWrapper}>
           <Ionicons name="business-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
           <TextInput
@@ -393,13 +691,27 @@ export default function Register() {
             placeholder="e.g., State Bank of India"
             placeholderTextColor="#9ca3af"
             value={formData.bankName}
-            onChangeText={(text) => setFormData({ ...formData, bankName: text })}
+            onChangeText={(text) => syncBank('bankName', text)}
           />
         </View>
       </View>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>Account Number <Text style={styles.required}>*</Text></Text>
+        <Text style={styles.label}>Account Holder Name</Text>
+        <View style={styles.inputWrapper}>
+          <Ionicons name="person-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
+          <TextInput
+            style={styles.input}
+            placeholder="As per bank records"
+            placeholderTextColor="#9ca3af"
+            value={formData.accountHolderName}
+            onChangeText={(text) => syncBank('accountHolderName', text)}
+          />
+        </View>
+      </View>
+
+      <View style={styles.inputGroup}>
+        <Text style={styles.label}>Account Number</Text>
         <View style={styles.inputWrapper}>
           <Ionicons name="card-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
           <TextInput
@@ -407,14 +719,14 @@ export default function Register() {
             placeholder="Enter account number"
             placeholderTextColor="#9ca3af"
             value={formData.accountNumber}
-            onChangeText={(text) => setFormData({ ...formData, accountNumber: text })}
+            onChangeText={(text) => syncBank('accountNumber', text)}
             keyboardType="numeric"
           />
         </View>
       </View>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>Confirm Account Number <Text style={styles.required}>*</Text></Text>
+        <Text style={styles.label}>Confirm Account Number</Text>
         <View style={styles.inputWrapper}>
           <Ionicons name="checkmark-circle-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
           <TextInput
@@ -422,22 +734,22 @@ export default function Register() {
             placeholder="Re-enter account number"
             placeholderTextColor="#9ca3af"
             value={formData.confirmAccountNumber}
-            onChangeText={(text) => setFormData({ ...formData, confirmAccountNumber: text })}
+            onChangeText={(text) => syncBank('confirmAccountNumber', text)}
             keyboardType="numeric"
           />
         </View>
       </View>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>IFSC Code <Text style={styles.required}>*</Text></Text>
+        <Text style={styles.label}>IFSC Code</Text>
         <View style={styles.inputWrapper}>
           <Ionicons name="git-branch-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
           <TextInput
             style={styles.input}
             placeholder="e.g., SBIN0001234"
             placeholderTextColor="#9ca3af"
-            value={formData.ifscCode}
-            onChangeText={(text) => setFormData({ ...formData, ifscCode: text.toUpperCase() })}
+            value={formData.bankDetail.IFSC}
+            onChangeText={(text) => syncBank('IFSC', text)}
             autoCapitalize="characters"
             maxLength={11}
           />
@@ -452,8 +764,8 @@ export default function Register() {
             style={styles.input}
             placeholder="Branch location"
             placeholderTextColor="#9ca3af"
-            value={formData.branch}
-            onChangeText={(text) => setFormData({ ...formData, branch: text })}
+            value={formData.bankDetail.branch}
+            onChangeText={(text) => syncBank('branch', text)}
           />
         </View>
       </View>
@@ -467,60 +779,72 @@ export default function Register() {
     </View>
   );
 
+  // ─── EXPERIENCE ───────────────────────────────────────────────────────────────
   const toggleWorkingDay = (day: string) => {
     const currentDays = formData.workingDays;
     if (currentDays.includes(day)) {
-      setFormData({
-        ...formData,
-        workingDays: currentDays.filter(d => d !== day)
-      });
+      setFormData({ ...formData, workingDays: currentDays.filter(d => d !== day) });
     } else {
-      setFormData({
-        ...formData,
-        workingDays: [...currentDays, day]
-      });
+      setFormData({ ...formData, workingDays: [...currentDays, day] });
     }
   };
 
   const renderExperience = () => {
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    
+
     return (
       <View style={styles.formSection}>
         <Text style={styles.sectionTitle}>Experience & Availability</Text>
-        
+
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Years of Experience <Text style={styles.required}>*</Text></Text>
+          <Text style={styles.label}>Years of Experience</Text>
           <View style={styles.inputWrapper}>
             <Ionicons name="time-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
               placeholder="How many years of experience?"
               placeholderTextColor="#9ca3af"
-              value={formData.yearsOfExperience}
-              onChangeText={(text) => setFormData({ ...formData, yearsOfExperience: text })}
+              value={formData.totalYears}
+              onChangeText={(text) => setFormData({ ...formData, totalYears: text })}
               keyboardType="numeric"
             />
           </View>
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Specialization <Text style={styles.required}>*</Text></Text>
-          <View style={[styles.inputWrapper, styles.textAreaWrapper]}>
+          <Text style={styles.label}>Number of Technicians / Staff</Text>
+          <View style={styles.inputWrapper}>
+            <Ionicons name="people-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
             <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Describe your areas of expertise and special skills..."
+              style={styles.input}
+              placeholder="e.g., 5"
               placeholderTextColor="#9ca3af"
-              value={formData.specialization}
-              onChangeText={(text) => setFormData({ ...formData, specialization: text })}
-              multiline
-              numberOfLines={4}
+              value={formData.numberOfStaff === 0 ? '' : String(formData.numberOfStaff)}
+              onChangeText={(text) => setFormData({ ...formData, numberOfStaff: parseInt(text) || 0 })}
+              keyboardType="numeric"
             />
           </View>
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Working Days <Text style={styles.required}>*</Text></Text>
+          <Text style={styles.label}>Services Offered</Text>
+          <View style={[styles.inputWrapper, styles.textAreaWrapper]}>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              placeholder="List the services you offer..."
+              placeholderTextColor="#9ca3af"
+              value={formData.servicesOffered}
+              onChangeText={(text) => setFormData({ ...formData, servicesOffered: text })}
+              multiline
+              numberOfLines={3}
+            />
+          </View>
+        </View>
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>
+            Working Days <Text style={styles.required}>*</Text>
+          </Text>
           <Text style={styles.helperText}>Select the days you are available</Text>
           <View style={styles.daysContainer}>
             {days.map(day => (
@@ -543,47 +867,16 @@ export default function Register() {
           </View>
         </View>
 
-        <View style={styles.row}>
-          <View style={[styles.inputGroup, styles.flex1]}>
-            <Text style={styles.label}>Working Hours From <Text style={styles.required}>*</Text></Text>
-            <View style={styles.inputWrapper}>
-              <Ionicons name="time-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="e.g., 09:00 AM"
-                placeholderTextColor="#9ca3af"
-                value={formData.workingHoursFrom}
-                onChangeText={(text) => setFormData({ ...formData, workingHoursFrom: text })}
-              />
-            </View>
-          </View>
-
-          <View style={[styles.inputGroup, styles.flex1]}>
-            <Text style={styles.label}>Working Hours To <Text style={styles.required}>*</Text></Text>
-            <View style={styles.inputWrapper}>
-              <Ionicons name="time-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="e.g., 06:00 PM"
-                placeholderTextColor="#9ca3af"
-                value={formData.workingHoursTo}
-                onChangeText={(text) => setFormData({ ...formData, workingHoursTo: text })}
-              />
-            </View>
-          </View>
-        </View>
-
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Service Radius (km) <Text style={styles.required}>*</Text></Text>
+          <Text style={styles.label}>Working Timings</Text>
           <View style={styles.inputWrapper}>
-            <Ionicons name="locate-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
+            <Ionicons name="time-outline" size={20} color="#f59e0b" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="How far can you travel for service?"
+              placeholder="e.g., 9 AM - 7 PM"
               placeholderTextColor="#9ca3af"
-              value={formData.serviceRadius}
-              onChangeText={(text) => setFormData({ ...formData, serviceRadius: text })}
-              keyboardType="numeric"
+              value={formData.workingTimings}
+              onChangeText={(text) => setFormData({ ...formData, workingTimings: text })}
             />
           </View>
         </View>
@@ -591,8 +884,8 @@ export default function Register() {
     );
   };
 
-  const pickDocument = async (docType: keyof typeof formData.documents) => {
-    // In a real app, you would use expo-document-picker or expo-image-picker
+  // ─── DOCUMENTS ────────────────────────────────────────────────────────────────
+  const pickDocument = async (docType: 'addressProof' | 'profilePhoto') => {
     Alert.alert('Document Upload', 'Document picker would open here. For demo purposes, marking as selected.');
     setFormData({
       ...formData,
@@ -604,62 +897,54 @@ export default function Register() {
   };
 
   const renderDocuments = () => {
-    const documentTypes = [
-      { key: 'idProof', label: 'ID Proof', desc: 'Aadhar Card, PAN Card, Driving License' },
-      { key: 'addressProof', label: 'Address Proof', desc: 'Electricity Bill, Rent Agreement' },
-      { key: 'businessRegistration', label: 'Business Registration', desc: 'Shop Act, GST Certificate, Trade License' },
-      { key: 'taxDocument', label: 'Tax Document', desc: 'GST Certificate, Income Tax Returns' },
-      { key: 'profilePhoto', label: 'Profile Photo', desc: 'Clear photo of yourself for profile' },
-    ];
+    const documentTypes: {
+      key: 'addressProof' | 'profilePhoto';
+      label: string;
+      desc: string;
+    }[] = [
+        { key: 'addressProof', label: 'Address Proof', desc: 'Electricity Bill, Rent Agreement, Passport' },
+        { key: 'profilePhoto', label: 'Profile Photo', desc: 'Clear recent photograph of yourself' },
+      ];
+
+    const isUploaded = (key: 'addressProof' | 'profilePhoto') => !!formData.documents[key];
 
     return (
       <View style={styles.formSection}>
         <Text style={styles.sectionTitle}>Document Upload</Text>
         <Text style={styles.sectionDescription}>
-          Please upload the following documents (All documents are required)
+          All documents are optional. You can upload up to 5 documents (Aadhaar, PAN, GST Certificate, Address Proof, Business Registration, etc.)
         </Text>
 
         {documentTypes.map(({ key, label, desc }) => {
-          const isUploaded = formData.documents[key as keyof typeof formData.documents];
-          
+          const uploaded = isUploaded(key);
+
           return (
             <View key={key} style={styles.documentItem}>
               <View style={styles.documentHeader}>
                 <View style={styles.documentInfo}>
-                  <Text style={styles.documentLabel}>
-                    {label} <Text style={styles.required}>*</Text>
-                  </Text>
+                  <Text style={styles.documentLabel}>{label}</Text>
                   <Text style={styles.documentDesc}>{desc}</Text>
                 </View>
-                <View style={[
-                  styles.documentStatus,
-                  isUploaded && styles.documentStatusUploaded
-                ]}>
-                  <Ionicons 
-                    name={isUploaded ? 'checkmark-circle' : 'cloud-upload-outline'} 
-                    size={24} 
-                    color={isUploaded ? '#10b981' : '#9ca3af'} 
+                <View style={styles.documentStatus}>
+                  <Ionicons
+                    name={uploaded ? 'checkmark-circle' : 'cloud-upload-outline'}
+                    size={24}
+                    color={uploaded ? '#10b981' : '#9ca3af'}
                   />
                 </View>
               </View>
-              
+
               <TouchableOpacity
-                style={[
-                  styles.uploadButton,
-                  isUploaded && styles.uploadButtonUploaded
-                ]}
-                onPress={() => pickDocument(key as keyof typeof formData.documents)}
+                style={[styles.uploadButton, uploaded && styles.uploadButtonUploaded]}
+                onPress={() => pickDocument(key)}
               >
-                <Ionicons 
-                  name={isUploaded ? 'document-attach' : 'add-circle-outline'} 
-                  size={20} 
-                  color={isUploaded ? '#10b981' : '#f59e0b'} 
+                <Ionicons
+                  name={uploaded ? 'document-attach' : 'add-circle-outline'}
+                  size={20}
+                  color={uploaded ? '#10b981' : '#f59e0b'}
                 />
-                <Text style={[
-                  styles.uploadButtonText,
-                  isUploaded && styles.uploadButtonTextUploaded
-                ]}>
-                  {isUploaded ? 'Document Uploaded' : 'Upload Document'}
+                <Text style={[styles.uploadButtonText, uploaded && styles.uploadButtonTextUploaded]}>
+                  {uploaded ? 'Document Uploaded' : 'Click to upload'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -676,10 +961,11 @@ export default function Register() {
     );
   };
 
+  // ─── CREDENTIALS ──────────────────────────────────────────────────────────────
   const renderCredentials = () => (
     <View style={styles.formSection}>
       <Text style={styles.sectionTitle}>Secure your account</Text>
-      
+
       <View style={styles.inputGroup}>
         <Text style={styles.label}>Password <Text style={styles.required}>*</Text></Text>
         <View style={styles.inputWrapper}>
@@ -771,12 +1057,16 @@ export default function Register() {
       <View style={styles.summaryCard}>
         <Text style={styles.summaryTitle}>Registration Summary</Text>
         <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Business:</Text>
-          <Text style={styles.summaryValue}>{formData.businessName || '-'}</Text>
+          <Text style={styles.summaryLabel}>Company:</Text>
+          <Text style={styles.summaryValue}>{formData.company || '-'}</Text>
+        </View>
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryLabel}>Owner:</Text>
+          <Text style={styles.summaryValue}>{formData.name || '-'}</Text>
         </View>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Service:</Text>
-          <Text style={styles.summaryValue}>{formData.serviceType || '-'}</Text>
+          <Text style={styles.summaryValue}>{formData.typeOfService || '-'}</Text>
         </View>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Email:</Text>
@@ -788,7 +1078,7 @@ export default function Register() {
         </View>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Experience:</Text>
-          <Text style={styles.summaryValue}>{formData.yearsOfExperience ? `${formData.yearsOfExperience} years` : '-'}</Text>
+          <Text style={styles.summaryValue}>{formData.totalYears ? `${formData.totalYears} years` : '-'}</Text>
         </View>
       </View>
     </View>
@@ -796,22 +1086,14 @@ export default function Register() {
 
   const renderCurrentStep = () => {
     switch (currentStep) {
-      case 'basic':
-        return renderBasicInfo();
-      case 'contact':
-        return renderContact();
-      case 'business':
-        return renderBusiness();
-      case 'bank':
-        return renderBank();
-      case 'experience':
-        return renderExperience();
-      case 'documents':
-        return renderDocuments();
-      case 'credentials':
-        return renderCredentials();
-      default:
-        return null;
+      case 'basic': return renderBasicInfo();
+      case 'contact': return renderContact();
+      case 'business': return renderBusiness();
+      case 'bank': return renderBank();
+      case 'experience': return renderExperience();
+      case 'documents': return renderDocuments();
+      case 'credentials': return renderCredentials();
+      default: return null;
     }
   };
 
@@ -820,11 +1102,10 @@ export default function Register() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
-      <ScrollView 
+      <ScrollView
         contentContainerStyle={styles.scrollContainer}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
         <View style={styles.header}>
           <Image
             source={require('../../assets/images/logo.png')}
@@ -835,7 +1116,6 @@ export default function Register() {
           <Text style={styles.subtitle}>Join Ghar Sansaar and grow your business</Text>
         </View>
 
-        {/* Progress Bar */}
         <View style={styles.progressContainer}>
           <View style={styles.progressBar}>
             <View style={[styles.progressFill, { width: `${progress}%` }]} />
@@ -845,12 +1125,11 @@ export default function Register() {
           </Text>
         </View>
 
-        {/* Step Indicator */}
         <View style={styles.stepIndicatorContainer}>
           {steps.map((step, index) => {
             const isActive = step.id === currentStep;
             const isPast = index < getCurrentStepIndex();
-            
+
             return (
               <View key={step.id} style={styles.stepIndicatorItem}>
                 <View style={[
@@ -861,17 +1140,14 @@ export default function Register() {
                   {isPast ? (
                     <Ionicons name="checkmark" size={16} color="#fff" />
                   ) : (
-                    <Ionicons 
-                      name={step.icon as any} 
-                      size={16} 
-                      color={isActive ? '#fff' : '#9ca3af'} 
+                    <Ionicons
+                      name={step.icon as any}
+                      size={16}
+                      color={isActive ? '#fff' : '#9ca3af'}
                     />
                   )}
                 </View>
-                <Text style={[
-                  styles.stepText,
-                  isActive && styles.stepTextActive
-                ]}>
+                <Text style={[styles.stepText, isActive && styles.stepTextActive]}>
                   {step.title}
                 </Text>
               </View>
@@ -879,18 +1155,13 @@ export default function Register() {
           })}
         </View>
 
-        {/* Form Content */}
         <View style={styles.formContainer}>
           {renderCurrentStep()}
         </View>
 
-        {/* Navigation Buttons */}
         <View style={styles.buttonContainer}>
           {getCurrentStepIndex() > 0 && (
-            <TouchableOpacity
-              style={styles.buttonSecondary}
-              onPress={handlePrevious}
-            >
+            <TouchableOpacity style={styles.buttonSecondary} onPress={handlePrevious}>
               <Ionicons name="arrow-back" size={20} color="#f59e0b" />
               <Text style={styles.buttonSecondaryText}>Previous</Text>
             </TouchableOpacity>
@@ -918,8 +1189,7 @@ export default function Register() {
           )}
         </View>
 
-        {/* Login Link */}
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.loginContainer}
           onPress={() => router.push('/(auth)/login')}
         >
@@ -1037,6 +1307,12 @@ const styles = StyleSheet.create({
     color: '#1f2937',
     marginBottom: 8,
   },
+  sectionDescription: {
+    fontSize: 13,
+    color: '#6b7280',
+    marginTop: -8,
+    marginBottom: 12,
+  },
   inputGroup: {
     marginBottom: 8,
   },
@@ -1076,12 +1352,84 @@ const styles = StyleSheet.create({
     height: 100,
     textAlignVertical: 'top',
   },
-  row: {
+  dropdownWrapper: {
     flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f9fafb',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    height: 52,
+  },
+  readOnlyField: {
+    backgroundColor: '#f3f4f6',
+    opacity: 0.8,
+  },
+  dropdownText: {
+    flex: 1,
+    fontSize: 15,
+    color: '#1f2937',
+  },
+  placeholderText: {
+    color: '#9ca3af',
+  },
+  dropdownList: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 12,
+    marginTop: 4,
+    maxHeight: 200,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  dropdownItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  dropdownItemText: {
+    fontSize: 15,
+    color: '#1f2937',
+  },
+  businessTypeContainer: {
     gap: 12,
   },
-  flex1: {
-    flex: 1,
+  radioOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f9fafb',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  radioCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#f59e0b',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  radioSelected: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#f59e0b',
+  },
+  radioLabel: {
+    fontSize: 15,
+    color: '#1f2937',
+    fontWeight: '500',
   },
   infoBox: {
     flexDirection: 'row',
@@ -1096,6 +1444,138 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#1e40af',
     lineHeight: 18,
+  },
+  secureBox: {
+    flexDirection: 'row',
+    backgroundColor: '#f0fdf4',
+    padding: 12,
+    borderRadius: 8,
+    gap: 10,
+    marginTop: 8,
+  },
+  secureText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#166534',
+    lineHeight: 18,
+  },
+  helperText: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 4,
+  },
+  daysContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  dayButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#fff',
+    minWidth: 50,
+    alignItems: 'center',
+  },
+  dayButtonSelected: {
+    borderColor: '#f59e0b',
+    backgroundColor: '#fef3e2',
+  },
+  dayButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6b7280',
+  },
+  dayButtonTextSelected: {
+    color: '#f59e0b',
+  },
+  whatsappToggleRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  toggleOption: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#f9fafb',
+  },
+  toggleOptionSelected: {
+    borderColor: '#25d366',
+    backgroundColor: '#25d366',
+  },
+  toggleOptionNo: {
+    borderColor: '#6b7280',
+    backgroundColor: '#6b7280',
+  },
+  toggleOptionText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  toggleOptionTextSelected: {
+    color: '#fff',
+  },
+  documentItem: {
+    backgroundColor: '#f9fafb',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  documentHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  documentInfo: {
+    flex: 1,
+  },
+  documentLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: 4,
+  },
+  documentDesc: {
+    fontSize: 12,
+    color: '#6b7280',
+    lineHeight: 16,
+  },
+  documentStatus: {
+    marginLeft: 12,
+  },
+  uploadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    borderWidth: 2,
+    borderColor: '#f59e0b',
+    borderRadius: 8,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  uploadButtonUploaded: {
+    borderColor: '#10b981',
+    backgroundColor: '#f0fdf4',
+  },
+  uploadButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#f59e0b',
+  },
+  uploadButtonTextUploaded: {
+    color: '#10b981',
   },
   passwordTips: {
     backgroundColor: '#f0fdf4',
@@ -1205,116 +1685,6 @@ const styles = StyleSheet.create({
   loginLink: {
     color: '#f59e0b',
     fontWeight: '600',
-  },
-  sectionDescription: {
-    fontSize: 13,
-    color: '#6b7280',
-    marginTop: -8,
-    marginBottom: 12,
-  },
-  secureBox: {
-    flexDirection: 'row',
-    backgroundColor: '#f0fdf4',
-    padding: 12,
-    borderRadius: 8,
-    gap: 10,
-    marginTop: 8,
-  },
-  secureText: {
-    flex: 1,
-    fontSize: 13,
-    color: '#166534',
-    lineHeight: 18,
-  },
-  helperText: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginBottom: 8,
-    marginTop: -4,
-  },
-  daysContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  dayButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
-    minWidth: 50,
-    alignItems: 'center',
-  },
-  dayButtonSelected: {
-    borderColor: '#f59e0b',
-    backgroundColor: '#fef3e2',
-  },
-  dayButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#6b7280',
-  },
-  dayButtonTextSelected: {
-    color: '#f59e0b',
-  },
-  documentItem: {
-    backgroundColor: '#f9fafb',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  documentHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  documentInfo: {
-    flex: 1,
-  },
-  documentLabel: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#1f2937',
-    marginBottom: 4,
-  },
-  documentDesc: {
-    fontSize: 12,
-    color: '#6b7280',
-    lineHeight: 16,
-  },
-  documentStatus: {
-    marginLeft: 12,
-  },
-  documentStatusUploaded: {
-    // No additional styles needed, just for semantic clarity
-  },
-  uploadButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#fff',
-    borderWidth: 2,
-    borderColor: '#f59e0b',
-    borderRadius: 8,
-    paddingVertical: 10,
-    gap: 8,
-  },
-  uploadButtonUploaded: {
-    borderColor: '#10b981',
-    backgroundColor: '#f0fdf4',
-  },
-  uploadButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#f59e0b',
-  },
-  uploadButtonTextUploaded: {
-    color: '#10b981',
   },
   dividerWithText: {
     flexDirection: 'row',

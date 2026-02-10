@@ -34,6 +34,7 @@ export default function Login() {
         phone : phone,
         password: password
       }
+      debugger
       const response = await vendorAPI.login(loginData);
       debugger
       if(!response.data.success){
